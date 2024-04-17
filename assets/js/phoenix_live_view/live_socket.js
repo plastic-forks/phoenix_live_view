@@ -1,18 +1,13 @@
-/** Initializes the LiveSocket
+/**
+ * Initializes the LiveSocket
  *
- *
- * @param {string} endPoint - The string WebSocket endpoint, ie, `"wss://example.com/live"`,
- *                                               `"/live"` (inherited host & protocol)
- * @param {Phoenix.Socket} socket - the required Phoenix Socket class imported from "phoenix". For example:
- *
- *     import {Socket} from "phoenix"
- *     import {LiveSocket} from "phoenix_live_view"
- *     let liveSocket = new LiveSocket("/live", Socket, {...})
- *
+ * @param {string} endpoint - The endpoint for websocket/longpoll connection.
+ *   For example, `"wss://example.com/live"`, `"/live"` (inherited host & protocol)
+ * @param {Phoenix.Socket} socket - The Phoenix Socket class imported from "phoenix".
  * @param {Object} [opts] - Optional configuration. Outside of keys listed below, all
- * configuration is passed directly to the Phoenix Socket constructor.
+ *   configuration is passed directly to the Phoenix Socket constructor.
  * @param {Object} [opts.defaults] - The optional defaults to use for various bindings,
- * such as `phx-debounce`. Supports the following keys:
+ *   such as `phx-debounce`. Supports the following keys:
  *
  *   - debounce - the millisecond phx-debounce time. Defaults 300
  *   - throttle - the millisecond phx-throttle time. Defaults 300
@@ -23,11 +18,10 @@
  *     (el) => {view: el.getAttribute("data-my-view-name", token: window.myToken}
  *
  * @param {string} [opts.bindingPrefix] - The optional prefix to use for all phx DOM annotations.
- * Defaults to "phx-".
+ *   Defaults to "phx-".
  * @param {Object} [opts.hooks] - The optional object for referencing LiveView hook callbacks.
  * @param {Object} [opts.uploaders] - The optional object for referencing LiveView uploader callbacks.
- * @param {integer} [opts.loaderTimeout] - The optional delay in milliseconds to wait before apply
- * loading states.
+ * @param {integer} [opts.loaderTimeout] - The optional delay in milliseconds to wait before apply loading states.
  * @param {integer} [opts.maxReloads] - The maximum reloads before entering failsafe mode.
  * @param {integer} [opts.reloadJitterMin] - The minimum time between normal reload attempts.
  * @param {integer} [opts.reloadJitterMax] - The maximum time between normal reload attempts.
@@ -36,8 +30,9 @@
  *
  *     (view, kind, msg, obj) => console.log(`${view.id} ${kind}: ${msg} - `, obj)
  *
+ * @param {Object} [opts.dom] - TODO.
  * @param {Object} [opts.metadata] - The optional object mapping event names to functions for
- * populating event metadata. For example:
+ *   populating event metadata. For example:
  *
  *     metadata: {
  *       click: (e, el) => {
@@ -56,9 +51,10 @@
  *         }
  *       }
  *     }
- * @param {Object} [opts.sessionStorage] - An optional Storage compatible object
- * Useful when LiveView won't have access to `sessionStorage`.  For example, This could
- * happen if a site loads a cross-domain LiveView in an iframe.  Example usage:
+ *
+ * @param {Object} [opts.sessionStorage] - An optional Storage compatible object, which is useful
+ *   when LiveView won't have access to `sessionStorage`.  For example, This could happen if a
+ *   site loads a cross-domain LiveView in an iframe.  Example usage:
  *
  *     class InMemoryStorage {
  *       constructor() { this.storage = {} }
@@ -67,9 +63,9 @@
  *       setItem(keyName, keyValue) { this.storage[keyName] = keyValue }
  *     }
  *
- * @param {Object} [opts.localStorage] - An optional Storage compatible object
- * Useful for when LiveView won't have access to `localStorage`.
- * See `opts.sessionStorage` for examples.
+ * @param {Object} [opts.localStorage] - An optional Storage compatible object, which is useful
+ *   for when LiveView won't have access to `localStorage`. See `opts.sessionStorage` for examples.
+ *
  */
 
 import {
@@ -112,24 +108,42 @@ import View from './view'
 import JS from './js'
 
 export default class LiveSocket {
-  constructor(url, phxSocket, opts = {}) {
+  constructor(endpoint, socket, opts = {}) {
     this.unloaded = false
-    if (!phxSocket || phxSocket.constructor.name === 'Object') {
+
+    if (!socket || socket.constructor.name === 'Object') {
       throw new Error(`
       a phoenix Socket must be provided as the second argument to the LiveSocket constructor. For example:
 
-          import {Socket} from "phoenix"
-          import {LiveSocket} from "phoenix_live_view"
-          let liveSocket = new LiveSocket("/live", Socket, {...})
+          import { Socket } from "phoenix"
+          import { LiveSocket } from "phoenix_live_view"
+          let liveSocket = new LiveSocket("/live", Socket, { ... })
       `)
     }
-    this.socket = new phxSocket(url, opts)
-    this.bindingPrefix = opts.bindingPrefix || BINDING_PREFIX
+
+    this.socket = new socket(endpoint, opts)
+
     this.opts = opts
-    this.params = closure(opts.params || {})
-    this.viewLogger = opts.viewLogger
-    this.metadataCallbacks = opts.metadata || {}
     this.defaults = Object.assign(clone(DEFAULTS), opts.defaults || {})
+    this.params = closure(opts.params || {})
+    this.bindingPrefix = opts.bindingPrefix || BINDING_PREFIX
+    this.hooks = opts.hooks || {}
+    this.uploaders = opts.uploaders || {}
+    this.loaderTimeout = opts.loaderTimeout || LOADER_TIMEOUT
+    this.maxReloads = opts.maxReloads || MAX_RELOADS
+    this.reloadWithJitterTimer = null
+    this.reloadJitterMin = opts.reloadJitterMin || RELOAD_JITTER_MIN
+    this.reloadJitterMax = opts.reloadJitterMax || RELOAD_JITTER_MAX
+    this.failsafeJitter = opts.failsafeJitter || FAILSAFE_JITTER
+    this.viewLogger = opts.viewLogger
+    this.domCallbacks = Object.assign(
+      { onNodeAdded: closure(), onBeforeElUpdated: closure() },
+      opts.dom || {}
+    )
+    this.metadataCallbacks = opts.metadata || {}
+    this.sessionStorage = opts.sessionStorage || window.sessionStorage
+    this.localStorage = opts.localStorage || window.localStorage
+
     this.activeElement = null
     this.prevActive = null
     this.silenced = false
@@ -141,21 +155,8 @@ export default class LiveSocket {
     this.href = window.location.href
     this.pendingLink = null
     this.currentLocation = clone(window.location)
-    this.hooks = opts.hooks || {}
-    this.uploaders = opts.uploaders || {}
-    this.loaderTimeout = opts.loaderTimeout || LOADER_TIMEOUT
-    this.reloadWithJitterTimer = null
-    this.maxReloads = opts.maxReloads || MAX_RELOADS
-    this.reloadJitterMin = opts.reloadJitterMin || RELOAD_JITTER_MIN
-    this.reloadJitterMax = opts.reloadJitterMax || RELOAD_JITTER_MAX
-    this.failsafeJitter = opts.failsafeJitter || FAILSAFE_JITTER
-    this.localStorage = opts.localStorage || window.localStorage
-    this.sessionStorage = opts.sessionStorage || window.sessionStorage
     this.boundTopLevelEvents = false
-    this.domCallbacks = Object.assign(
-      { onNodeAdded: closure(), onBeforeElUpdated: closure() },
-      opts.dom || {}
-    )
+
     this.transitions = new TransitionSet()
     window.addEventListener('pagehide', (_e) => {
       this.unloaded = true
@@ -224,7 +225,8 @@ export default class LiveSocket {
     if (window.location.hostname === 'localhost' && !this.isDebugDisabled()) {
       this.enableDebug()
     }
-    let doConnect = () => {
+
+    const doConnect = () => {
       if (this.joinRootViews()) {
         this.bindTopLevelEvents()
         this.socket.connect()
@@ -235,7 +237,8 @@ export default class LiveSocket {
       }
       this.joinDeadView()
     }
-    if (['complete', 'loaded', 'interactive'].indexOf(document.readyState) >= 0) {
+
+    if (['complete', 'loaded', 'interactive'].includes(document.readyState)) {
       doConnect()
     } else {
       document.addEventListener('DOMContentLoaded', () => doConnect())
@@ -438,8 +441,10 @@ export default class LiveSocket {
           this.main = view
         }
       }
+
       rootsFound = true
     })
+
     return rootsFound
   }
 
