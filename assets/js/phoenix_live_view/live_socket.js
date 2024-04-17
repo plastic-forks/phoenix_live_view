@@ -83,7 +83,7 @@ import {
   PHX_LIVE_LINK,
   PHX_LV_DEBUG,
   PHX_LV_LATENCY_SIM,
-  PHX_LV_PROFILE,
+  PHX_LV_PROFILING,
   PHX_MAIN,
   PHX_PARENT_ID,
   PHX_VIEW_SELECTOR,
@@ -169,35 +169,25 @@ export default class LiveSocket {
     })
   }
 
-  // public
-
-  isProfileEnabled() {
-    return this.sessionStorage.getItem(PHX_LV_PROFILE) === 'true'
-  }
-
-  isDebugEnabled() {
-    return this.sessionStorage.getItem(PHX_LV_DEBUG) === 'true'
-  }
-
-  isDebugDisabled() {
-    return this.sessionStorage.getItem(PHX_LV_DEBUG) === 'false'
-  }
+  /* toggle - debug */
 
   enableDebug() {
     this.sessionStorage.setItem(PHX_LV_DEBUG, 'true')
-  }
-
-  enableProfiling() {
-    this.sessionStorage.setItem(PHX_LV_PROFILE, 'true')
   }
 
   disableDebug() {
     this.sessionStorage.setItem(PHX_LV_DEBUG, 'false')
   }
 
-  disableProfiling() {
-    this.sessionStorage.removeItem(PHX_LV_PROFILE)
+  isDebugEnabled() {
+    return this.sessionStorage.getItem(PHX_LV_DEBUG) === 'true'
   }
+
+  isDebugDisabledManually() {
+    return this.sessionStorage.getItem(PHX_LV_DEBUG) === 'false'
+  }
+
+  /* toggle - latency simulation */
 
   enableLatencySim(upperBoundMs) {
     this.enableDebug()
@@ -216,13 +206,31 @@ export default class LiveSocket {
     return str ? parseInt(str) : null
   }
 
+  /* toggle - profiling */
+
+  enableProfiling() {
+    this.sessionStorage.setItem(PHX_LV_PROFILING, 'true')
+  }
+
+  disableProfiling() {
+    this.sessionStorage.removeItem(PHX_LV_PROFILING)
+  }
+
+  isProfilingEnabled() {
+    return this.sessionStorage.getItem(PHX_LV_PROFILING) === 'true'
+  }
+
+  /* enter the live world */
+
   getSocket() {
     return this.socket
   }
 
   connect() {
-    // enable debug by default if on localhost and not explicitly disabled
-    if (window.location.hostname === 'localhost' && !this.isDebugDisabled()) {
+    if (
+      !this.isDebugDisabledManually() &&
+      ['localhost', '127.0.0.1'].includes(window.location.hostname)
+    ) {
       this.enableDebug()
     }
 
@@ -285,13 +293,14 @@ export default class LiveSocket {
   }
 
   time(name, func) {
-    if (!this.isProfileEnabled() || !console.time) {
+    if (!this.isProfilingEnabled() || !console.time) {
       return func()
+    } else {
+      console.time(name)
+      let result = func()
+      console.timeEnd(name)
+      return result
     }
-    console.time(name)
-    let result = func()
-    console.timeEnd(name)
-    return result
   }
 
   log(view, kind, msgCallback) {
