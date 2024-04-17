@@ -1,5 +1,5 @@
-import {Socket} from "phoenix"
-import LiveSocket from "phoenix_live_view/live_socket"
+import { Socket } from 'phoenix'
+import LiveSocket from 'phoenix_live_view/live_socket'
 
 let stubViewPushInput = (view, callback) => {
   view.pushInput = (sourceEl, targetCtx, newCid, event, pushOpts, originalCallback) => {
@@ -25,17 +25,17 @@ let prepareLiveViewDOM = (document, rootId) => {
   `
 }
 
-describe("events", () => {
+describe('events', () => {
   beforeEach(() => {
-    prepareLiveViewDOM(global.document, "root")
+    prepareLiveViewDOM(global.document, 'root')
   })
 
-  test("send change event to correct target", () => {
-    let liveSocket = new LiveSocket("/live", Socket)
+  test('send change event to correct target', () => {
+    let liveSocket = new LiveSocket('/live', Socket)
     liveSocket.connect()
-    let view = liveSocket.getViewByEl(document.getElementById("root"))
+    let view = liveSocket.getViewByEl(document.getElementById('root'))
     view.isConnected = () => true
-    let input = view.el.querySelector("#first_name")
+    let input = view.el.querySelector('#first_name')
     let meta = {
       event: null,
       target: null,
@@ -46,17 +46,17 @@ describe("events", () => {
       meta = {
         event,
         target: targetCtx,
-        changed: pushOpts["_target"]
+        changed: pushOpts['_target'],
       }
     })
 
-    input.value = "John Doe"
-    input.dispatchEvent(new Event("change", {bubbles: true}))
+    input.value = 'John Doe'
+    input.dispatchEvent(new Event('change', { bubbles: true }))
 
     expect(meta).toEqual({
-      event: "validate",
+      event: 'validate',
       target: 2,
-      changed: "user[first_name]"
+      changed: 'user[first_name]',
     })
   })
 })

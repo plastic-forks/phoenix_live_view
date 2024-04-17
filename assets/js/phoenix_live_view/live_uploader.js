@@ -1,21 +1,16 @@
-import {
-  PHX_DONE_REFS,
-  PHX_PREFLIGHTED_REFS,
-  PHX_UPLOAD_REF
-} from "./constants"
+import { PHX_DONE_REFS, PHX_PREFLIGHTED_REFS, PHX_UPLOAD_REF } from './constants'
 
-import {
-} from "./utils"
+import {} from './utils'
 
-import DOM from "./dom"
-import UploadEntry from "./upload_entry"
+import DOM from './dom'
+import UploadEntry from './upload_entry'
 
 let liveUploaderFileRef = 0
 
 export default class LiveUploader {
-  static genFileRef(file){
+  static genFileRef(file) {
     let ref = file._phxRef
-    if(ref !== undefined){
+    if (ref !== undefined) {
       return ref
     } else {
       file._phxRef = (liveUploaderFileRef++).toString()
@@ -23,26 +18,26 @@ export default class LiveUploader {
     }
   }
 
-  static getEntryDataURL(inputEl, ref, callback){
-    let file = this.activeFiles(inputEl).find(file => this.genFileRef(file) === ref)
+  static getEntryDataURL(inputEl, ref, callback) {
+    let file = this.activeFiles(inputEl).find((file) => this.genFileRef(file) === ref)
     callback(URL.createObjectURL(file))
   }
 
-  static hasUploadsInProgress(formEl){
+  static hasUploadsInProgress(formEl) {
     let active = 0
-    DOM.findUploadInputs(formEl).forEach(input => {
-      if(input.getAttribute(PHX_PREFLIGHTED_REFS) !== input.getAttribute(PHX_DONE_REFS)){
+    DOM.findUploadInputs(formEl).forEach((input) => {
+      if (input.getAttribute(PHX_PREFLIGHTED_REFS) !== input.getAttribute(PHX_DONE_REFS)) {
         active++
       }
     })
     return active > 0
   }
 
-  static serializeUploads(inputEl){
+  static serializeUploads(inputEl) {
     let files = this.activeFiles(inputEl)
     let fileData = {}
-    files.forEach(file => {
-      let entry = {path: inputEl.name}
+    files.forEach((file) => {
+      let entry = { path: inputEl.name }
       let uploadRef = inputEl.getAttribute(PHX_UPLOAD_REF)
       fileData[uploadRef] = fileData[uploadRef] || []
       entry.ref = this.genFileRef(file)
@@ -51,63 +46,75 @@ export default class LiveUploader {
       entry.relative_path = file.webkitRelativePath
       entry.type = file.type
       entry.size = file.size
-      if(typeof(file.meta) === "function"){ entry.meta = file.meta() }
+      if (typeof file.meta === 'function') {
+        entry.meta = file.meta()
+      }
       fileData[uploadRef].push(entry)
     })
     return fileData
   }
 
-  static clearFiles(inputEl){
+  static clearFiles(inputEl) {
     inputEl.value = null
     inputEl.removeAttribute(PHX_UPLOAD_REF)
-    DOM.putPrivate(inputEl, "files", [])
+    DOM.putPrivate(inputEl, 'files', [])
   }
 
-  static untrackFile(inputEl, file){
-    DOM.putPrivate(inputEl, "files", DOM.private(inputEl, "files").filter(f => !Object.is(f, file)))
+  static untrackFile(inputEl, file) {
+    DOM.putPrivate(
+      inputEl,
+      'files',
+      DOM.private(inputEl, 'files').filter((f) => !Object.is(f, file))
+    )
   }
 
-  static trackFiles(inputEl, files, dataTransfer){
-    if(inputEl.getAttribute("multiple") !== null){
-      let newFiles = files.filter(file => !this.activeFiles(inputEl).find(f => Object.is(f, file)))
-      DOM.updatePrivate(inputEl, "files", [], (existing) => existing.concat(newFiles))
+  static trackFiles(inputEl, files, dataTransfer) {
+    if (inputEl.getAttribute('multiple') !== null) {
+      let newFiles = files.filter(
+        (file) => !this.activeFiles(inputEl).find((f) => Object.is(f, file))
+      )
+      DOM.updatePrivate(inputEl, 'files', [], (existing) => existing.concat(newFiles))
       inputEl.value = null
     } else {
       // Reset inputEl files to align output with programmatic changes (i.e. drag and drop)
-      if(dataTransfer && dataTransfer.files.length > 0){ inputEl.files = dataTransfer.files }
-      DOM.putPrivate(inputEl, "files", files)
+      if (dataTransfer && dataTransfer.files.length > 0) {
+        inputEl.files = dataTransfer.files
+      }
+      DOM.putPrivate(inputEl, 'files', files)
     }
   }
 
-  static activeFileInputs(formEl){
+  static activeFileInputs(formEl) {
     let fileInputs = DOM.findUploadInputs(formEl)
-    return Array.from(fileInputs).filter(el => el.files && this.activeFiles(el).length > 0)
+    return Array.from(fileInputs).filter((el) => el.files && this.activeFiles(el).length > 0)
   }
 
-  static activeFiles(input){
-    return (DOM.private(input, "files") || []).filter(f => UploadEntry.isActive(input, f))
+  static activeFiles(input) {
+    return (DOM.private(input, 'files') || []).filter((f) => UploadEntry.isActive(input, f))
   }
 
-  static inputsAwaitingPreflight(formEl){
+  static inputsAwaitingPreflight(formEl) {
     let fileInputs = DOM.findUploadInputs(formEl)
-    return Array.from(fileInputs).filter(input => this.filesAwaitingPreflight(input).length > 0)
+    return Array.from(fileInputs).filter((input) => this.filesAwaitingPreflight(input).length > 0)
   }
 
-  static filesAwaitingPreflight(input){
-    return this.activeFiles(input).filter(f => !UploadEntry.isPreflighted(input, f) && !UploadEntry.isPreflightInProgress(f))
+  static filesAwaitingPreflight(input) {
+    return this.activeFiles(input).filter(
+      (f) => !UploadEntry.isPreflighted(input, f) && !UploadEntry.isPreflightInProgress(f)
+    )
   }
 
-  static markPreflightInProgress(entries){
-    entries.forEach(entry => UploadEntry.markPreflightInProgress(entry.file))
+  static markPreflightInProgress(entries) {
+    entries.forEach((entry) => UploadEntry.markPreflightInProgress(entry.file))
   }
 
-  constructor(inputEl, view, onComplete){
+  constructor(inputEl, view, onComplete) {
     this.autoUpload = DOM.isAutoUpload(inputEl)
     this.view = view
     this.onComplete = onComplete
-    this._entries =
-      Array.from(LiveUploader.filesAwaitingPreflight(inputEl) || [])
-        .map(file => new UploadEntry(inputEl, file, view, this.autoUpload))
+    this._entries = Array.from(LiveUploader.filesAwaitingPreflight(inputEl) || []).map(
+      (file) => new UploadEntry(inputEl, file, view, this.autoUpload)
+    )
 
     // prevent sending duplicate preflight requests
     LiveUploader.markPreflightInProgress(this._entries)
@@ -115,36 +122,45 @@ export default class LiveUploader {
     this.numEntriesInProgress = this._entries.length
   }
 
-  isAutoUpload(){ return this.autoUpload }
+  isAutoUpload() {
+    return this.autoUpload
+  }
 
-  entries(){ return this._entries }
+  entries() {
+    return this._entries
+  }
 
-  initAdapterUpload(resp, onError, liveSocket){
-    this._entries =
-      this._entries.map(entry => {
-        if(entry.isCancelled()){
-          this.numEntriesInProgress--
-          if(this.numEntriesInProgress === 0){ this.onComplete() }
-        } else {
-          entry.zipPostFlight(resp)
-          entry.onDone(() => {
-            this.numEntriesInProgress--
-            if(this.numEntriesInProgress === 0){ this.onComplete() }
-          })
+  initAdapterUpload(resp, onError, liveSocket) {
+    this._entries = this._entries.map((entry) => {
+      if (entry.isCancelled()) {
+        this.numEntriesInProgress--
+        if (this.numEntriesInProgress === 0) {
+          this.onComplete()
         }
-        return entry
-      })
+      } else {
+        entry.zipPostFlight(resp)
+        entry.onDone(() => {
+          this.numEntriesInProgress--
+          if (this.numEntriesInProgress === 0) {
+            this.onComplete()
+          }
+        })
+      }
+      return entry
+    })
 
     let groupedEntries = this._entries.reduce((acc, entry) => {
-      if(!entry.meta){ return acc }
-      let {name, callback} = entry.uploader(liveSocket.uploaders)
-      acc[name] = acc[name] || {callback: callback, entries: []}
+      if (!entry.meta) {
+        return acc
+      }
+      let { name, callback } = entry.uploader(liveSocket.uploaders)
+      acc[name] = acc[name] || { callback: callback, entries: [] }
       acc[name].entries.push(entry)
       return acc
     }, {})
 
-    for(let name in groupedEntries){
-      let {callback, entries} = groupedEntries[name]
+    for (let name in groupedEntries) {
+      let { callback, entries } = groupedEntries[name]
       callback(entries, onError, resp, liveSocket)
     }
   }

@@ -15,31 +15,28 @@ import {
   PHX_STREAM_REF,
   PHX_VIEWPORT_TOP,
   PHX_VIEWPORT_BOTTOM,
-} from "./constants"
+} from './constants'
 
-import {
-  detectDuplicateIds,
-  isCid
-} from "./utils"
+import { detectDuplicateIds, isCid } from './utils'
 
-import DOM from "./dom"
-import DOMPostMorphRestorer from "./dom_post_morph_restorer"
-import morphdom from "morphdom"
+import DOM from './dom'
+import DOMPostMorphRestorer from './dom_post_morph_restorer'
+import morphdom from 'morphdom'
 
 export default class DOMPatch {
-  static patchEl(fromEl, toEl, activeElement){
+  static patchEl(fromEl, toEl, activeElement) {
     morphdom(fromEl, toEl, {
       childrenOnly: false,
       onBeforeElUpdated: (fromEl, toEl) => {
-        if(activeElement && activeElement.isSameNode(fromEl) && DOM.isFormInput(fromEl)){
+        if (activeElement && activeElement.isSameNode(fromEl) && DOM.isFormInput(fromEl)) {
           DOM.mergeFocusedInput(fromEl, toEl)
           return false
         }
-      }
+      },
     })
   }
 
-  constructor(view, container, id, html, streams, targetCID){
+  constructor(view, container, id, html, streams, targetCID) {
     this.view = view
     this.liveSocket = view.liveSocket
     this.container = container
@@ -52,39 +49,51 @@ export default class DOMPatch {
     this.targetCID = targetCID
     this.cidPatch = isCid(this.targetCID)
     this.pendingRemoves = []
-    this.phxRemove = this.liveSocket.binding("remove")
+    this.phxRemove = this.liveSocket.binding('remove')
     this.callbacks = {
-      beforeadded: [], beforeupdated: [], beforephxChildAdded: [],
-      afteradded: [], afterupdated: [], afterdiscarded: [], afterphxChildAdded: [],
-      aftertransitionsDiscarded: []
+      beforeadded: [],
+      beforeupdated: [],
+      beforephxChildAdded: [],
+      afteradded: [],
+      afterupdated: [],
+      afterdiscarded: [],
+      afterphxChildAdded: [],
+      aftertransitionsDiscarded: [],
     }
   }
 
-  before(kind, callback){ this.callbacks[`before${kind}`].push(callback) }
-  after(kind, callback){ this.callbacks[`after${kind}`].push(callback) }
-
-  trackBefore(kind, ...args){
-    this.callbacks[`before${kind}`].forEach(callback => callback(...args))
+  before(kind, callback) {
+    this.callbacks[`before${kind}`].push(callback)
+  }
+  after(kind, callback) {
+    this.callbacks[`after${kind}`].push(callback)
   }
 
-  trackAfter(kind, ...args){
-    this.callbacks[`after${kind}`].forEach(callback => callback(...args))
+  trackBefore(kind, ...args) {
+    this.callbacks[`before${kind}`].forEach((callback) => callback(...args))
   }
 
-  markPrunableContentForRemoval(){
+  trackAfter(kind, ...args) {
+    this.callbacks[`after${kind}`].forEach((callback) => callback(...args))
+  }
+
+  markPrunableContentForRemoval() {
     let phxUpdate = this.liveSocket.binding(PHX_UPDATE)
-    DOM.all(this.container, `[${phxUpdate}=append] > *, [${phxUpdate}=prepend] > *`, el => {
-      el.setAttribute(PHX_PRUNE, "")
+    DOM.all(this.container, `[${phxUpdate}=append] > *, [${phxUpdate}=prepend] > *`, (el) => {
+      el.setAttribute(PHX_PRUNE, '')
     })
   }
 
-  perform(isJoinPatch){
-    let {view, liveSocket, container, html} = this
+  perform(isJoinPatch) {
+    let { view, liveSocket, container, html } = this
     let targetContainer = this.isCIDPatch() ? this.targetCIDContainer(html) : container
-    if(this.isCIDPatch() && !targetContainer){ return }
+    if (this.isCIDPatch() && !targetContainer) {
+      return
+    }
 
     let focused = liveSocket.getActiveElement()
-    let {selectionStart, selectionEnd} = focused && DOM.hasSelectionRange(focused) ? focused : {}
+    let { selectionStart, selectionEnd } =
+      focused && DOM.hasSelectionRange(focused) ? focused : {}
     let phxUpdate = liveSocket.binding(PHX_UPDATE)
     let phxFeedbackFor = liveSocket.binding(PHX_FEEDBACK_FOR)
     let phxFeedbackGroup = liveSocket.binding(PHX_FEEDBACK_GROUP)
@@ -99,42 +108,50 @@ export default class DOMPatch {
 
     let externalFormTriggered = null
 
-    function morph(targetContainer, source){
+    function morph(targetContainer, source) {
       morphdom(targetContainer, source, {
         childrenOnly: targetContainer.getAttribute(PHX_COMPONENT) === null,
         getNodeKey: (node) => {
-          if(DOM.isPhxDestroyed(node)){ return null }
+          if (DOM.isPhxDestroyed(node)) {
+            return null
+          }
           // If we have a join patch, then by definition there was no PHX_MAGIC_ID.
           // This is important to reduce the amount of elements morphdom discards.
-          if(isJoinPatch){ return node.id }
+          if (isJoinPatch) {
+            return node.id
+          }
           return node.id || (node.getAttribute && node.getAttribute(PHX_MAGIC_ID))
         },
         // skip indexing from children when container is stream
-        skipFromChildren: (from) => { return from.getAttribute(phxUpdate) === PHX_STREAM },
+        skipFromChildren: (from) => {
+          return from.getAttribute(phxUpdate) === PHX_STREAM
+        },
         // tell morphdom how to add a child
         addChild: (parent, child) => {
-          let {ref, streamAt} = this.getStreamInsert(child)
-          if(ref === undefined){ return parent.appendChild(child) }
+          let { ref, streamAt } = this.getStreamInsert(child)
+          if (ref === undefined) {
+            return parent.appendChild(child)
+          }
 
           this.setStreamRef(child, ref)
 
           // streaming
-          if(streamAt === 0){
-            parent.insertAdjacentElement("afterbegin", child)
-          } else if(streamAt === -1){
+          if (streamAt === 0) {
+            parent.insertAdjacentElement('afterbegin', child)
+          } else if (streamAt === -1) {
             parent.appendChild(child)
-          } else if(streamAt > 0){
+          } else if (streamAt > 0) {
             let sibling = Array.from(parent.children)[streamAt]
             parent.insertBefore(child, sibling)
           }
         },
         onBeforeNodeAdded: (el) => {
           DOM.maybeAddPrivateHooks(el, phxViewportTop, phxViewportBottom)
-          this.trackBefore("added", el)
+          this.trackBefore('added', el)
 
           let morphedEl = el
           // this is a stream item that was kept on reset, recursively morph it
-          if(!isJoinPatch && this.streamComponentRestore[el.id]){
+          if (!isJoinPatch && this.streamComponentRestore[el.id]) {
             morphedEl = this.streamComponentRestore[el.id]
             delete this.streamComponentRestore[el.id]
             morph.bind(this)(morphedEl, el)
@@ -143,39 +160,53 @@ export default class DOMPatch {
           return morphedEl
         },
         onNodeAdded: (el) => {
-          if(el.getAttribute){ this.maybeReOrderStream(el, true) }
-          if(DOM.isFeedbackContainer(el, phxFeedbackFor)) feedbackContainers.push(el)
+          if (el.getAttribute) {
+            this.maybeReOrderStream(el, true)
+          }
+          if (DOM.isFeedbackContainer(el, phxFeedbackFor)) feedbackContainers.push(el)
 
           // hack to fix Safari handling of img srcset and video tags
-          if(el instanceof HTMLImageElement && el.srcset){
+          if (el instanceof HTMLImageElement && el.srcset) {
             el.srcset = el.srcset
-          } else if(el instanceof HTMLVideoElement && el.autoplay){
+          } else if (el instanceof HTMLVideoElement && el.autoplay) {
             el.play()
           }
-          if(DOM.isNowTriggerFormExternal(el, phxTriggerExternal)){
+          if (DOM.isNowTriggerFormExternal(el, phxTriggerExternal)) {
             externalFormTriggered = el
           }
 
           // nested view handling
-          if((DOM.isPhxChild(el) && view.ownsElement(el)) || DOM.isPhxSticky(el) && view.ownsElement(el.parentNode)){
-            this.trackAfter("phxChildAdded", el)
+          if (
+            (DOM.isPhxChild(el) && view.ownsElement(el)) ||
+            (DOM.isPhxSticky(el) && view.ownsElement(el.parentNode))
+          ) {
+            this.trackAfter('phxChildAdded', el)
           }
           added.push(el)
         },
         onNodeDiscarded: (el) => this.onNodeDiscarded(el),
         onBeforeNodeDiscarded: (el) => {
-          if(el.getAttribute && el.getAttribute(PHX_PRUNE) !== null){ return true }
-          if(el.parentElement !== null && el.id &&
-            DOM.isPhxUpdate(el.parentElement, phxUpdate, [PHX_STREAM, "append", "prepend"])){
+          if (el.getAttribute && el.getAttribute(PHX_PRUNE) !== null) {
+            return true
+          }
+          if (
+            el.parentElement !== null &&
+            el.id &&
+            DOM.isPhxUpdate(el.parentElement, phxUpdate, [PHX_STREAM, 'append', 'prepend'])
+          ) {
             return false
           }
-          if(this.maybePendingRemove(el)){ return false }
-          if(this.skipCIDSibling(el)){ return false }
+          if (this.maybePendingRemove(el)) {
+            return false
+          }
+          if (this.skipCIDSibling(el)) {
+            return false
+          }
 
           return true
         },
         onElUpdated: (el) => {
-          if(DOM.isNowTriggerFormExternal(el, phxTriggerExternal)){
+          if (DOM.isNowTriggerFormExternal(el, phxTriggerExternal)) {
             externalFormTriggered = el
           }
           updates.push(el)
@@ -185,28 +216,38 @@ export default class DOMPatch {
           DOM.maybeAddPrivateHooks(toEl, phxViewportTop, phxViewportBottom)
           // mark both from and to els as feedback containers, as we don't know yet which one will be used
           // and we also need to remove the phx-no-feedback class when the phx-feedback-for attribute is removed
-          if(DOM.isFeedbackContainer(fromEl, phxFeedbackFor) || DOM.isFeedbackContainer(toEl, phxFeedbackFor)){
+          if (
+            DOM.isFeedbackContainer(fromEl, phxFeedbackFor) ||
+            DOM.isFeedbackContainer(toEl, phxFeedbackFor)
+          ) {
             feedbackContainers.push(fromEl)
             feedbackContainers.push(toEl)
           }
           DOM.cleanChildNodes(toEl, phxUpdate)
-          if(this.skipCIDSibling(toEl)){
+          if (this.skipCIDSibling(toEl)) {
             // if this is a live component used in a stream, we may need to reorder it
             this.maybeReOrderStream(fromEl)
             return false
           }
-          if(DOM.isPhxSticky(fromEl)){ return false }
-          if(DOM.isIgnored(fromEl, phxUpdate) || (fromEl.form && fromEl.form.isSameNode(externalFormTriggered))){
-            this.trackBefore("updated", fromEl, toEl)
-            DOM.mergeAttrs(fromEl, toEl, {isIgnored: DOM.isIgnored(fromEl, phxUpdate)})
+          if (DOM.isPhxSticky(fromEl)) {
+            return false
+          }
+          if (
+            DOM.isIgnored(fromEl, phxUpdate) ||
+            (fromEl.form && fromEl.form.isSameNode(externalFormTriggered))
+          ) {
+            this.trackBefore('updated', fromEl, toEl)
+            DOM.mergeAttrs(fromEl, toEl, { isIgnored: DOM.isIgnored(fromEl, phxUpdate) })
             updates.push(fromEl)
             DOM.applyStickyOperations(fromEl)
             return false
           }
-          if(fromEl.type === "number" && (fromEl.validity && fromEl.validity.badInput)){ return false }
-          if(!DOM.syncPendingRef(fromEl, toEl, disableWith)){
-            if(DOM.isUploadInput(fromEl)){
-              this.trackBefore("updated", fromEl, toEl)
+          if (fromEl.type === 'number' && fromEl.validity && fromEl.validity.badInput) {
+            return false
+          }
+          if (!DOM.syncPendingRef(fromEl, toEl, disableWith)) {
+            if (DOM.isUploadInput(fromEl)) {
+              this.trackBefore('updated', fromEl, toEl)
               updates.push(fromEl)
             }
             DOM.applyStickyOperations(fromEl)
@@ -214,10 +255,12 @@ export default class DOMPatch {
           }
 
           // nested view handling
-          if(DOM.isPhxChild(toEl)){
+          if (DOM.isPhxChild(toEl)) {
             let prevSession = fromEl.getAttribute(PHX_SESSION)
-            DOM.mergeAttrs(fromEl, toEl, {exclude: [PHX_STATIC]})
-            if(prevSession !== ""){ fromEl.setAttribute(PHX_SESSION, prevSession) }
+            DOM.mergeAttrs(fromEl, toEl, { exclude: [PHX_STATIC] })
+            if (prevSession !== '') {
+              fromEl.setAttribute(PHX_SESSION, prevSession)
+            }
             fromEl.setAttribute(PHX_ROOT_ID, this.rootID)
             DOM.applyStickyOperations(fromEl)
             return false
@@ -229,8 +272,8 @@ export default class DOMPatch {
           let isFocusedFormEl = focused && fromEl.isSameNode(focused) && DOM.isFormInput(fromEl)
           // skip patching focused inputs unless focus is a select that has changed options
           let focusedSelectChanged = isFocusedFormEl && this.isChangedSelect(fromEl, toEl)
-          if(isFocusedFormEl && fromEl.type !== "hidden" && !focusedSelectChanged){
-            this.trackBefore("updated", fromEl, toEl)
+          if (isFocusedFormEl && fromEl.type !== 'hidden' && !focusedSelectChanged) {
+            this.trackBefore('updated', fromEl, toEl)
             DOM.mergeFocusedInput(fromEl, toEl)
             DOM.syncAttrsToProps(fromEl)
             updates.push(fromEl)
@@ -238,47 +281,53 @@ export default class DOMPatch {
             return false
           } else {
             // blur focused select if it changed so native UI is updated (ie safari won't update visible options)
-            if(focusedSelectChanged){ fromEl.blur() }
-            if(DOM.isPhxUpdate(toEl, phxUpdate, ["append", "prepend"])){
-              appendPrependUpdates.push(new DOMPostMorphRestorer(fromEl, toEl, toEl.getAttribute(phxUpdate)))
+            if (focusedSelectChanged) {
+              fromEl.blur()
+            }
+            if (DOM.isPhxUpdate(toEl, phxUpdate, ['append', 'prepend'])) {
+              appendPrependUpdates.push(
+                new DOMPostMorphRestorer(fromEl, toEl, toEl.getAttribute(phxUpdate))
+              )
             }
 
             DOM.syncAttrsToProps(toEl)
             DOM.applyStickyOperations(toEl)
-            this.trackBefore("updated", fromEl, toEl)
+            this.trackBefore('updated', fromEl, toEl)
             return true
           }
-        }
+        },
       })
     }
 
-    this.trackBefore("added", container)
-    this.trackBefore("updated", container, container)
+    this.trackBefore('added', container)
+    this.trackBefore('updated', container, container)
 
-    liveSocket.time("morphdom", () => {
+    liveSocket.time('morphdom', () => {
       this.streams.forEach(([ref, inserts, deleteIds, reset]) => {
         inserts.forEach(([key, streamAt, limit]) => {
-          this.streamInserts[key] = {ref, streamAt, limit, reset}
+          this.streamInserts[key] = { ref, streamAt, limit, reset }
         })
-        if(reset !== undefined){
-          DOM.all(container, `[${PHX_STREAM_REF}="${ref}"]`, child => {
+        if (reset !== undefined) {
+          DOM.all(container, `[${PHX_STREAM_REF}="${ref}"]`, (child) => {
             this.removeStreamChildElement(child)
           })
         }
-        deleteIds.forEach(id => {
+        deleteIds.forEach((id) => {
           let child = container.querySelector(`[id="${id}"]`)
-          if(child){ this.removeStreamChildElement(child) }
+          if (child) {
+            this.removeStreamChildElement(child)
+          }
         })
       })
 
       // clear stream items from the dead render if they are not inserted again
-      if(isJoinPatch){
-        DOM.all(this.container, `[${phxUpdate}=${PHX_STREAM}]`, el => {
+      if (isJoinPatch) {
+        DOM.all(this.container, `[${phxUpdate}=${PHX_STREAM}]`, (el) => {
           // make sure to only remove elements owned by the current view
           // see https://github.com/phoenixframework/phoenix_live_view/issues/3047
           this.liveSocket.owner(el, (view) => {
-            if(view === this.view){
-              Array.from(el.children).forEach(child => {
+            if (view === this.view) {
+              Array.from(el.children).forEach((child) => {
                 this.removeStreamChildElement(child)
               })
             }
@@ -289,24 +338,26 @@ export default class DOMPatch {
       morph.bind(this)(targetContainer, html)
     })
 
-    if(liveSocket.isDebugEnabled()){ detectDuplicateIds() }
+    if (liveSocket.isDebugEnabled()) {
+      detectDuplicateIds()
+    }
 
-    if(appendPrependUpdates.length > 0){
-      liveSocket.time("post-morph append/prepend restoration", () => {
-        appendPrependUpdates.forEach(update => update.perform())
+    if (appendPrependUpdates.length > 0) {
+      liveSocket.time('post-morph append/prepend restoration', () => {
+        appendPrependUpdates.forEach((update) => update.perform())
       })
     }
 
     DOM.maybeHideFeedback(targetContainer, feedbackContainers, phxFeedbackFor, phxFeedbackGroup)
 
     liveSocket.silenceEvents(() => DOM.restoreFocus(focused, selectionStart, selectionEnd))
-    DOM.dispatchEvent(document, "phx:update")
-    added.forEach(el => this.trackAfter("added", el))
-    updates.forEach(el => this.trackAfter("updated", el))
+    DOM.dispatchEvent(document, 'phx:update')
+    added.forEach((el) => this.trackAfter('added', el))
+    updates.forEach((el) => this.trackAfter('updated', el))
 
     this.transitionPendingRemoves()
 
-    if(externalFormTriggered){
+    if (externalFormTriggered) {
       liveSocket.unload()
       // use prototype's submit in case there's a form control with name or id of "submit"
       // https://developer.mozilla.org/en-US/docs/Web/API/HTMLFormElement/submit
@@ -315,14 +366,16 @@ export default class DOMPatch {
     return true
   }
 
-  onNodeDiscarded(el){
+  onNodeDiscarded(el) {
     // nested view handling
-    if(DOM.isPhxChild(el) || DOM.isPhxSticky(el)){ this.liveSocket.destroyViewByEl(el) }
-    this.trackAfter("discarded", el)
+    if (DOM.isPhxChild(el) || DOM.isPhxSticky(el)) {
+      this.liveSocket.destroyViewByEl(el)
+    }
+    this.trackAfter('discarded', el)
   }
 
-  maybePendingRemove(node){
-    if(node.getAttribute && node.getAttribute(this.phxRemove) !== null){
+  maybePendingRemove(node) {
+    if (node.getAttribute && node.getAttribute(this.phxRemove) !== null) {
       this.pendingRemoves.push(node)
       return true
     } else {
@@ -330,38 +383,40 @@ export default class DOMPatch {
     }
   }
 
-  removeStreamChildElement(child){
+  removeStreamChildElement(child) {
     // we need to store the node if it is actually re-added in the same patch
     // we do NOT want to execute phx-remove, we do NOT want to call onNodeDiscarded
-    if(this.streamInserts[child.id]){
+    if (this.streamInserts[child.id]) {
       this.streamComponentRestore[child.id] = child
       child.remove()
     } else {
       // only remove the element now if it has no phx-remove binding
-      if(!this.maybePendingRemove(child)){
+      if (!this.maybePendingRemove(child)) {
         child.remove()
         this.onNodeDiscarded(child)
       }
     }
   }
 
-  getStreamInsert(el){
+  getStreamInsert(el) {
     let insert = el.id ? this.streamInserts[el.id] : {}
     return insert || {}
   }
 
-  setStreamRef(el, ref){
-    DOM.putSticky(el, PHX_STREAM_REF, el => el.setAttribute(PHX_STREAM_REF, ref))
+  setStreamRef(el, ref) {
+    DOM.putSticky(el, PHX_STREAM_REF, (el) => el.setAttribute(PHX_STREAM_REF, ref))
   }
 
-  maybeReOrderStream(el, isNew){
-    let {ref, streamAt, reset} = this.getStreamInsert(el)
-    if(streamAt === undefined){ return }
+  maybeReOrderStream(el, isNew) {
+    let { ref, streamAt, reset } = this.getStreamInsert(el)
+    if (streamAt === undefined) {
+      return
+    }
 
     // we need to set the PHX_STREAM_REF here as well as addChild is invoked only for parents
     this.setStreamRef(el, ref)
 
-    if(!reset && !isNew){
+    if (!reset && !isNew) {
       // we only reorder if the element is new or it's a stream reset
       return
     }
@@ -370,18 +425,20 @@ export default class DOMPatch {
     // it doesn't if we are currently recursively morphing (restoring a saved stream child)
     // because the element is not yet added to the real dom;
     // reordering does not make sense in that case anyway
-    if(!el.parentElement){ return }
+    if (!el.parentElement) {
+      return
+    }
 
-    if(streamAt === 0){
+    if (streamAt === 0) {
       el.parentElement.insertBefore(el, el.parentElement.firstElementChild)
-    } else if(streamAt > 0){
+    } else if (streamAt > 0) {
       let children = Array.from(el.parentElement.children)
       let oldIndex = children.indexOf(el)
-      if(streamAt >= children.length - 1){
+      if (streamAt >= children.length - 1) {
         el.parentElement.appendChild(el)
       } else {
         let sibling = children[streamAt]
-        if(oldIndex > streamAt){
+        if (oldIndex > streamAt) {
           el.parentElement.insertBefore(el, sibling)
         } else {
           el.parentElement.insertBefore(el, sibling.nextElementSibling)
@@ -392,39 +449,47 @@ export default class DOMPatch {
     this.maybeLimitStream(el)
   }
 
-  maybeLimitStream(el){
-    let {limit} = this.getStreamInsert(el)
+  maybeLimitStream(el) {
+    let { limit } = this.getStreamInsert(el)
     let children = limit !== null && Array.from(el.parentElement.children)
-    if(limit && limit < 0 && children.length > limit * -1){
-      children.slice(0, children.length + limit).forEach(child => this.removeStreamChildElement(child))
-    } else if(limit && limit >= 0 && children.length > limit){
-      children.slice(limit).forEach(child => this.removeStreamChildElement(child))
+    if (limit && limit < 0 && children.length > limit * -1) {
+      children
+        .slice(0, children.length + limit)
+        .forEach((child) => this.removeStreamChildElement(child))
+    } else if (limit && limit >= 0 && children.length > limit) {
+      children.slice(limit).forEach((child) => this.removeStreamChildElement(child))
     }
   }
 
-  transitionPendingRemoves(){
-    let {pendingRemoves, liveSocket} = this
-    if(pendingRemoves.length > 0){
+  transitionPendingRemoves() {
+    let { pendingRemoves, liveSocket } = this
+    if (pendingRemoves.length > 0) {
       liveSocket.transitionRemoves(pendingRemoves)
       liveSocket.requestDOMUpdate(() => {
-        pendingRemoves.forEach(el => {
+        pendingRemoves.forEach((el) => {
           let child = DOM.firstPhxChild(el)
-          if(child){ liveSocket.destroyViewByEl(child) }
+          if (child) {
+            liveSocket.destroyViewByEl(child)
+          }
           el.remove()
         })
-        this.trackAfter("transitionsDiscarded", pendingRemoves)
+        this.trackAfter('transitionsDiscarded', pendingRemoves)
       })
     }
   }
 
-  isChangedSelect(fromEl, toEl){
-    if(!(fromEl instanceof HTMLSelectElement) || fromEl.multiple){ return false }
-    if(fromEl.options.length !== toEl.options.length){ return true }
+  isChangedSelect(fromEl, toEl) {
+    if (!(fromEl instanceof HTMLSelectElement) || fromEl.multiple) {
+      return false
+    }
+    if (fromEl.options.length !== toEl.options.length) {
+      return true
+    }
 
     let fromSelected = fromEl.selectedOptions[0]
     let toSelected = toEl.selectedOptions[0]
-    if(fromSelected && fromSelected.hasAttribute("selected")){
-      toSelected.setAttribute("selected", fromSelected.getAttribute("selected"))
+    if (fromSelected && fromSelected.hasAttribute('selected')) {
+      toSelected.setAttribute('selected', fromSelected.getAttribute('selected'))
     }
 
     // in general we have to be very careful with using isEqualNode as it does not a reliable
@@ -432,21 +497,27 @@ export default class DOMPatch {
     return !fromEl.isEqualNode(toEl)
   }
 
-  isCIDPatch(){ return this.cidPatch }
+  isCIDPatch() {
+    return this.cidPatch
+  }
 
-  skipCIDSibling(el){
+  skipCIDSibling(el) {
     return el.nodeType === Node.ELEMENT_NODE && el.hasAttribute(PHX_SKIP)
   }
 
-  targetCIDContainer(html){
-    if(!this.isCIDPatch()){ return }
+  targetCIDContainer(html) {
+    if (!this.isCIDPatch()) {
+      return
+    }
     let [first, ...rest] = DOM.findComponentNodeList(this.container, this.targetCID)
-    if(rest.length === 0 && DOM.childNodeLength(html) === 1){
+    if (rest.length === 0 && DOM.childNodeLength(html) === 1) {
       return first
     } else {
       return first && first.parentNode
     }
   }
 
-  indexOf(parent, child){ return Array.from(parent.children).indexOf(child) }
+  indexOf(parent, child) {
+    return Array.from(parent.children).indexOf(child)
+  }
 }
