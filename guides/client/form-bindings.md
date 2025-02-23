@@ -173,21 +173,6 @@ it will add the necessary hidden input fields for tracking ids of Ecto associati
 </.inputs_for>
 ```
 
-## File inputs
-
-LiveView forms support [reactive file inputs](uploads.md),
-including drag and drop support via the `phx-drop-target`
-attribute:
-
-```heex
-<div class="container" phx-drop-target={@uploads.avatar.ref}>
-  ...
-  <.live_file_input upload={@uploads.avatar} />
-</div>
-```
-
-See `Phoenix.Component.live_file_input/1` for more.
-
 ## Submitting the form action over HTTP
 
 The `phx-trigger-action` attribute can be added to a form to trigger a standard

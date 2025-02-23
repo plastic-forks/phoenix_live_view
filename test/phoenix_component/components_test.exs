@@ -625,68 +625,6 @@ defmodule Phoenix.LiveView.ComponentsTest do
     end
   end
 
-  describe "live_file_input/1" do
-    test "renders attributes" do
-      assigns = %{
-        conf: %Phoenix.LiveView.UploadConfig{
-          auto_upload?: true,
-          entries: [%{preflighted?: false, done?: false, ref: "foo"}]
-        }
-      }
-
-      assert t2h(
-               ~H|<.live_file_input upload={@conf} class="<script>alert('nice try');</script>" />|
-             ) ==
-               ~X|<input type="file" accept="" data-phx-hook="Phoenix.LiveFileUpload" data-phx-update="ignore" data-phx-active-refs="foo" data-phx-done-refs="" data-phx-preflighted-refs="" data-phx-auto-upload class="&lt;script&gt;alert(&#39;nice try&#39;);&lt;/script&gt;">|
-    end
-
-    test "renders optional webkitdirectory attribute" do
-      assigns = %{
-        conf: %Phoenix.LiveView.UploadConfig{
-          entries: [%{preflighted?: false, done?: false, ref: "foo"}]
-        }
-      }
-
-      assert t2h(~H|<.live_file_input upload={@conf} webkitdirectory />|) ==
-               ~X|<input type="file" accept="" data-phx-hook="Phoenix.LiveFileUpload" data-phx-update="ignore" data-phx-active-refs="foo" data-phx-done-refs="" data-phx-preflighted-refs="" webkitdirectory>|
-    end
-
-    test "renders optional capture attribute" do
-      assigns = %{
-        conf: %Phoenix.LiveView.UploadConfig{
-          entries: [%{preflighted?: false, done?: false, ref: "foo"}]
-        }
-      }
-
-      assert t2h(~H|<.live_file_input upload={@conf} capture="user" />|) ==
-               ~X|<input type="file" accept="" data-phx-hook="Phoenix.LiveFileUpload" data-phx-update="ignore" data-phx-active-refs="foo" data-phx-done-refs="" data-phx-preflighted-refs="" capture="user">|
-    end
-
-    test "sets accept from config" do
-      assigns = %{
-        conf: %Phoenix.LiveView.UploadConfig{
-          accept: ~w(.png),
-          entries: [%{preflighted?: false, done?: false, ref: "foo"}]
-        }
-      }
-
-      assert t2h(~H|<.live_file_input upload={@conf} />|) ==
-               ~X|<input type="file" accept=".png" data-phx-hook="Phoenix.LiveFileUpload" data-phx-update="ignore" data-phx-active-refs="foo" data-phx-done-refs="" data-phx-preflighted-refs="">|
-    end
-
-    test "renders accept override" do
-      assigns = %{
-        conf: %Phoenix.LiveView.UploadConfig{
-          accept: ~w(.png),
-          entries: [%{preflighted?: false, done?: false, ref: "foo"}]
-        }
-      }
-
-      assert t2h(~H|<.live_file_input upload={@conf} accept=".jpeg" />|) ==
-               ~X|<input type="file" accept=".jpeg" data-phx-hook="Phoenix.LiveFileUpload" data-phx-update="ignore" data-phx-active-refs="foo" data-phx-done-refs="" data-phx-preflighted-refs="">|
-    end
-  end
-
   describe "intersperse" do
     test "generates form with no options" do
       assigns = %{}
