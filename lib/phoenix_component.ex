@@ -882,7 +882,7 @@ defmodule Phoenix.Component do
       caller: __CALLER__,
       indentation: meta[:indentation] || 0,
       source: expr,
-      tag_handler: Phoenix.LiveView.HTMLEngine
+      tag_handler: Phoenix.LiveView.HTMLTagHandler
     ]
 
     EEx.compile_string(expr, options)
@@ -1780,25 +1780,17 @@ defmodule Phoenix.Component do
 
   @doc false
   defmacro __using__(opts \\ []) do
-    conditional =
-      if __CALLER__.module != Phoenix.LiveView.Helpers do
-        quote do: import(Phoenix.LiveView.Helpers)
+    quote bind_quoted: [opts: opts] do
+      import Kernel, except: [def: 2, defp: 2]
+      import Phoenix.Component
+      import Phoenix.Component.Declarative
+      require Phoenix.Template
+
+      for {prefix_match, value} <- Phoenix.Component.Declarative.__setup__(__MODULE__, opts) do
+        @doc false
+        def __global__?(unquote(prefix_match)), do: unquote(value)
       end
-
-    imports =
-      quote bind_quoted: [opts: opts] do
-        import Kernel, except: [def: 2, defp: 2]
-        import Phoenix.Component
-        import Phoenix.Component.Declarative
-        require Phoenix.Template
-
-        for {prefix_match, value} <- Phoenix.Component.Declarative.__setup__(__MODULE__, opts) do
-          @doc false
-          def __global__?(unquote(prefix_match)), do: unquote(value)
-        end
-      end
-
-    [conditional, imports]
+    end
   end
 
   @doc ~S'''
@@ -3159,7 +3151,7 @@ defmodule Phoenix.Component do
     assigns =
       assigns
       |> assign(:tag, tag)
-      |> assign(:escaped_attrs, Phoenix.LiveView.HTMLEngine.attributes_escape(rest))
+      |> assign(:escaped_attrs, Phoenix.LiveView.HTMLTagHandler.attributes_escape(rest))
 
     if assigns.inner_block != [] do
       ~H"""

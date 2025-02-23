@@ -2,9 +2,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
   use ExUnit.Case, async: true
 
   import ExUnit.CaptureIO
-
   import Phoenix.Component
-
   alias Phoenix.LiveView.Tokenizer.ParseError
 
   defp eval(string, assigns \\ %{}, opts \\ []) do
@@ -17,7 +15,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
         subengine: Phoenix.LiveView.Engine,
         caller: env,
         source: string,
-        tag_handler: Phoenix.LiveView.HTMLEngine
+        tag_handler: Phoenix.LiveView.HTMLTagHandler
       )
 
     quoted = EEx.compile_string(string, opts)
@@ -42,7 +40,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
           module: __MODULE__,
           caller: __CALLER__,
           source: string,
-          tag_handler: Phoenix.LiveView.HTMLEngine
+          tag_handler: Phoenix.LiveView.HTMLTagHandler
         )
       )
       |> Phoenix.HTML.Safe.to_iodata()

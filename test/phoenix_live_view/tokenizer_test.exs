@@ -1,9 +1,13 @@
 defmodule Phoenix.LiveView.TokenizerTest do
   use ExUnit.Case, async: true
-  alias Phoenix.LiveView.Tokenizer.ParseError
-  alias Phoenix.LiveView.Tokenizer
 
-  defp tokenizer_state(text), do: Tokenizer.init(0, "nofile", text, Phoenix.LiveView.HTMLEngine)
+  alias Phoenix.LiveView.Tokenizer
+  alias Phoenix.LiveView.Tokenizer.ParseError
+  alias Phoenix.LiveView.HTMLTagHandler
+
+  defp tokenizer_state(text) do
+    Tokenizer.init(0, "nofile", text, HTMLTagHandler)
+  end
 
   defp tokenize(text) do
     Tokenizer.tokenize(text, [], [], {:text, :enabled}, tokenizer_state(text))

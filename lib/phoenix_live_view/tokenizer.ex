@@ -1,5 +1,6 @@
 defmodule Phoenix.LiveView.Tokenizer do
   @moduledoc false
+
   @space_chars ~c"\s\t\f"
   @quote_chars ~c"\"'"
   @stop_chars ~c">/=\r\n" ++ @quote_chars ++ @space_chars
@@ -69,7 +70,7 @@ defmodule Phoenix.LiveView.Tokenizer do
   * `indentation` - An integer that indicates the current indentation.
   * `file` - Can be either a file or a string "nofile".
   * `source` - The contents of the file as binary used to be tokenized.
-  * `tag_handler` - Tag handler to classify the tags. See `Phoenix.LiveView.TagEngine`
+  * `tag_handler` - Tag handler to classify the tags. See `Phoenix.LiveView.TagHandler`
     behaviour.
   """
   def init(indentation, file, source, tag_handler) do
@@ -101,7 +102,7 @@ defmodule Phoenix.LiveView.Tokenizer do
       iex> alias Phoenix.LiveView.Tokenizer
 
       iex> state =
-        Tokenizer.init(indent, file, [text: "<section><div/></section>"], HTMLEngine)
+        Tokenizer.init(indentation, file, [text: "<section><div/></section>"], ExampleTagHandler)
 
       iex> Tokenizer.tokenize(state)
       {[
@@ -109,6 +110,7 @@ defmodule Phoenix.LiveView.Tokenizer do
          {:tag, "div", [], %{column: 10, line: 1, closing: :self}},
          {:tag, "section", [], %{column: 1, line: 1}}
        ], {:text, :enabled}}
+
   """
   def tokenize(text, meta, tokens, cont, state) do
     line = Keyword.get(meta, :line, 1)
@@ -204,33 +206,6 @@ defmodule Phoenix.LiveView.Tokenizer do
     )
   end
 
-  ## handle_script
-
-  defp handle_script("</script>" <> rest, line, column, buffer, acc, state) do
-    acc = [
-      {:close, :tag, "script", %{line: line, column: column, inner_location: {line, column}}}
-      | text_to_acc(buffer, acc, line, column, [])
-    ]
-
-    handle_text(rest, line, column + 9, [], acc, state)
-  end
-
-  defp handle_script("\r\n" <> rest, line, _column, buffer, acc, state) do
-    handle_script(rest, line + 1, state.column_offset, ["\r\n" | buffer], acc, state)
-  end
-
-  defp handle_script("\n" <> rest, line, _column, buffer, acc, state) do
-    handle_script(rest, line + 1, state.column_offset, ["\n" | buffer], acc, state)
-  end
-
-  defp handle_script(<<c::utf8, rest::binary>>, line, column, buffer, acc, state) do
-    handle_script(rest, line, column + 1, [char_or_bin(c) | buffer], acc, state)
-  end
-
-  defp handle_script(<<>>, line, column, buffer, acc, _state) do
-    ok(text_to_acc(buffer, acc, line, column, []), :script)
-  end
-
   ## handle_style
 
   defp handle_style("</style>" <> rest, line, column, buffer, acc, state) do
@@ -256,6 +231,33 @@ defmodule Phoenix.LiveView.Tokenizer do
 
   defp handle_style(<<>>, line, column, buffer, acc, _state) do
     ok(text_to_acc(buffer, acc, line, column, []), :style)
+  end
+
+  ## handle_script
+
+  defp handle_script("</script>" <> rest, line, column, buffer, acc, state) do
+    acc = [
+      {:close, :tag, "script", %{line: line, column: column, inner_location: {line, column}}}
+      | text_to_acc(buffer, acc, line, column, [])
+    ]
+
+    handle_text(rest, line, column + 9, [], acc, state)
+  end
+
+  defp handle_script("\r\n" <> rest, line, _column, buffer, acc, state) do
+    handle_script(rest, line + 1, state.column_offset, ["\r\n" | buffer], acc, state)
+  end
+
+  defp handle_script("\n" <> rest, line, _column, buffer, acc, state) do
+    handle_script(rest, line + 1, state.column_offset, ["\n" | buffer], acc, state)
+  end
+
+  defp handle_script(<<c::utf8, rest::binary>>, line, column, buffer, acc, state) do
+    handle_script(rest, line, column + 1, [char_or_bin(c) | buffer], acc, state)
+  end
+
+  defp handle_script(<<>>, line, column, buffer, acc, _state) do
+    ok(text_to_acc(buffer, acc, line, column, []), :script)
   end
 
   ## handle_comment
