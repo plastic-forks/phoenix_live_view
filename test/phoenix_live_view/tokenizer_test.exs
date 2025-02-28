@@ -15,6 +15,11 @@ defmodule Phoenix.LiveView.TokenizerTest do
     |> Enum.reverse()
   end
 
+  defp tokenize_attrs(code) do
+    [{:tag, "div", attrs, %{}}] = tokenize(code)
+    attrs
+  end
+
   describe "text" do
     test "represented as {:text, value}" do
       assert tokenize("Hello") == [{:text, "Hello", %{line_end: 1, column_end: 6}}]
@@ -982,10 +987,5 @@ defmodule Phoenix.LiveView.TokenizerTest do
              {:close, :tag, "div", %{line: 4, column: 1}},
              {:text, "\ntext after\n", %{line_end: 6, column_end: 1}}
            ] = tokens
-  end
-
-  defp tokenize_attrs(code) do
-    [{:tag, "div", attrs, %{}}] = tokenize(code)
-    attrs
   end
 end

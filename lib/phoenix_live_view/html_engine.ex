@@ -32,4 +32,30 @@ defmodule Phoenix.LiveView.HTMLEngine do
       tag_handler: Phoenix.LiveView.HTMLTagHandler
     )
   end
+
+  # TODO: remove it
+  def debug() do
+    source = """
+    <% c = 1 %>
+    <p phx-no-format>hello</p>
+    <%= if 1 == 3 do %>
+      <p>world</p>
+    <% end %>
+    """
+
+    trim = Application.get_env(:phoenix, :trim_on_html_eex_engine, true)
+
+    options = [
+      engine: Phoenix.LiveView.TagEngine,
+      line: 1,
+      trim: trim,
+      caller: nil,
+      source: source,
+      tag_handler: Phoenix.LiveView.HTMLTagHandler
+    ]
+
+    {:ok, tokens} = EEx.tokenize(source, options)
+    IO.inspect(tokens)
+    EEx.Compiler.compile(tokens, source, options)
+  end
 end
