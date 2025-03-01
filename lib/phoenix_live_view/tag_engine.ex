@@ -92,7 +92,7 @@ defmodule Phoenix.LiveView.TagEngine do
     tokens = Enum.reverse(tokens)
 
     state
-    |> handle_tokens(tokens, context: "do-block", root: false)
+    |> handle_tokens(tokens, context: "do-block")
     |> invoke_subengine(:dump, [])
   end
 
@@ -118,7 +118,7 @@ defmodule Phoenix.LiveView.TagEngine do
 
     ast =
       state
-      |> handle_tokens(tokens, context: "template", root: nil)
+      |> handle_tokens(tokens, context: "template")
       |> invoke_subengine(:handle_body, [opts])
       |> Assign.handle_assigns()
 
@@ -152,7 +152,7 @@ defmodule Phoenix.LiveView.TagEngine do
 
   # ----------------------------------
 
-  defp handle_tokens(state, tokens, context: context, root: root) do
+  defp handle_tokens(state, tokens, context: context) do
     %{
       tag_handler: tag_handler,
       subengine: subengine,
@@ -171,7 +171,6 @@ defmodule Phoenix.LiveView.TagEngine do
       indentation: indentation,
       caller: caller,
       source: source,
-      root: root,
       previous_token_slot?: false,
       stack: [],
       tags: [],
@@ -180,6 +179,8 @@ defmodule Phoenix.LiveView.TagEngine do
 
     tokens
     |> Stream.map(&preprocess_token(&1, token_state))
+    |> Enum.map(& &1)
+    |> IO.inspect()
     |> Enum.reduce(token_state, &handle_token/2)
     |> validate_unclosed_tags!(context)
   end
@@ -191,8 +192,7 @@ defmodule Phoenix.LiveView.TagEngine do
     rules = [
       {&remove_phx_no_attr/3, [:tag, :remote_component, :local_component, :slot]},
       {&validate_tag_attr!/3, [:tag]},
-      # TODO: validate :for for component
-      # ...
+      {&validate_component_attr!/3, [:remote_component, :local_component]},
       {&pop_special_attr!/3, [:tag, :remote_component, :local_component]}
     ]
 
@@ -263,9 +263,51 @@ defmodule Phoenix.LiveView.TagEngine do
     {[attr | attrs], token_meta}
   end
 
+  defp validate_component_attr!({":" <> _ = name, value, meta} = attr, {attrs, token_meta}, state)
+       when name in [":if", ":for"] do
+    # validate duplicated attr
+    case List.keyfind(attrs, name, 0) do
+      nil ->
+        :ok
+
+      {_, _, _} ->
+        message = """
+        cannot define multiple #{name} attributes. \
+        Another #{name} has already been defined at line #{meta.line}\
+        """
+
+        raise_syntax_error!(message, meta, state)
+    end
+
+    # validate value of attr
+    case value do
+      {:expr, _, _} ->
+        :ok
+
+      _ ->
+        message = "#{name} must be an expression between {...}"
+        raise_syntax_error!(message, meta, state)
+    end
+
+    {[attr | attrs], token_meta}
+  end
+
+  defp validate_component_attr!({":let", _, _} = attr, {attrs, token_meta}, _state) do
+    {[attr | attrs], token_meta}
+  end
+
+  # TODO
+  # defp validate_component_attr!({":" <> _ = name, _, meta}, {_attrs, _token_meta}, state) do
+  #   message = "unsupported attribute #{name} in tags"
+  #   raise_syntax_error!(message, meta, state)
+  # end
+
+  defp validate_component_attr!(attr, {attrs, token_meta}, _state) do
+    {[attr | attrs], token_meta}
+  end
+
   defp pop_special_attr!({":" <> _ = name, value, meta} = attr, {attrs, token_meta}, state)
        when name in [":if", ":for"] do
-    IO.inspect(attr)
     expr = parse_expr!(value, state)
     validate_quoted_special_attr!(name, expr, meta, state)
 
@@ -294,7 +336,6 @@ defmodule Phoenix.LiveView.TagEngine do
       state
     else
       state
-      |> set_root_on_not_tag()
       |> update_subengine(:acc_text, [text])
     end
   end
@@ -303,7 +344,6 @@ defmodule Phoenix.LiveView.TagEngine do
 
   defp handle_token({:expr, marker, expr}, state) do
     state
-    |> set_root_on_not_tag()
     |> update_subengine(:acc_expr, [marker, expr])
   end
 
@@ -311,7 +351,6 @@ defmodule Phoenix.LiveView.TagEngine do
     expr = Code.string_to_quoted!(value, line: line, column: column, file: state.file)
 
     state
-    |> set_root_on_not_tag()
     |> update_subengine(:acc_expr, ["=", expr])
   end
 
@@ -324,12 +363,10 @@ defmodule Phoenix.LiveView.TagEngine do
       state
       |> push_substate_to_stack()
       |> update_subengine(:reset, [])
-      |> set_root_on_not_tag()
       |> handle_tag_and_attrs(name, attrs, suffix, to_location(tag_meta))
       |> handle_special_expr(tag_meta)
     else
       state
-      |> set_root_on_tag()
       |> handle_tag_and_attrs(name, attrs, suffix, to_location(tag_meta))
     end
   end
@@ -341,12 +378,10 @@ defmodule Phoenix.LiveView.TagEngine do
       state
       |> push_substate_to_stack()
       |> update_subengine(:reset, [])
-      |> set_root_on_not_tag()
       |> push_tag({:tag, name, attrs, tag_meta})
       |> handle_tag_and_attrs(name, attrs, ">", to_location(tag_meta))
     else
       state
-      |> set_root_on_tag()
       |> push_tag(token)
       |> handle_tag_and_attrs(name, attrs, ">", to_location(tag_meta))
     end
@@ -358,10 +393,6 @@ defmodule Phoenix.LiveView.TagEngine do
     state
     |> update_subengine(:acc_text, ["</#{name}>"])
     |> handle_special_expr(tag_open_meta)
-  end
-
-  defp has_special_expr?(tag_meta) do
-    Map.has_key?(tag_meta, :for) or Map.has_key?(tag_meta, :if)
   end
 
   # Remote function component (self close)
@@ -394,13 +425,11 @@ defmodule Phoenix.LiveView.TagEngine do
       state
       |> push_substate_to_stack()
       |> update_subengine(:reset, [])
-      |> set_root_on_not_tag()
       |> maybe_anno_caller(meta, state.file, line)
       |> update_subengine(:acc_expr, ["=", ast])
       |> handle_special_expr(tag_meta)
     else
       state
-      |> set_root_on_not_tag()
       |> maybe_anno_caller(meta, state.file, line)
       |> update_subengine(:acc_expr, ["=", ast])
     end
@@ -414,7 +443,6 @@ defmodule Phoenix.LiveView.TagEngine do
 
     if has_special_expr?(tag_meta) do
       state
-      |> set_root_on_not_tag()
       |> push_tag({:remote_component, name, attrs, tag_meta})
       |> init_slots()
       |> push_substate_to_stack()
@@ -423,7 +451,6 @@ defmodule Phoenix.LiveView.TagEngine do
       |> update_subengine(:reset, [])
     else
       state
-      |> set_root_on_not_tag()
       |> push_tag({:remote_component, name, attrs, tag_meta})
       |> init_slots()
       |> push_substate_to_stack()
@@ -543,13 +570,11 @@ defmodule Phoenix.LiveView.TagEngine do
       state
       |> push_substate_to_stack()
       |> update_subengine(:reset, [])
-      |> set_root_on_not_tag()
       |> maybe_anno_caller(meta, state.file, line)
       |> update_subengine(:acc_expr, ["=", ast])
       |> handle_special_expr(tag_meta)
     else
       state
-      |> set_root_on_not_tag()
       |> maybe_anno_caller(meta, state.file, line)
       |> update_subengine(:acc_expr, ["=", ast])
     end
@@ -560,7 +585,6 @@ defmodule Phoenix.LiveView.TagEngine do
   defp handle_token({:local_component, name, attrs, tag_meta} = token, state) do
     if has_special_expr?(tag_meta) do
       state
-      |> set_root_on_not_tag()
       |> push_tag({:local_component, name, attrs, tag_meta})
       |> init_slots()
       |> push_substate_to_stack()
@@ -569,7 +593,6 @@ defmodule Phoenix.LiveView.TagEngine do
       |> update_subengine(:reset, [])
     else
       state
-      |> set_root_on_not_tag()
       |> push_tag(token)
       |> init_slots()
       |> push_substate_to_stack()
@@ -606,6 +629,10 @@ defmodule Phoenix.LiveView.TagEngine do
     |> maybe_anno_caller(meta, state.file, line)
     |> update_subengine(:acc_expr, ["=", ast])
     |> handle_special_expr(tag_meta)
+  end
+
+  defp has_special_expr?(tag_meta) do
+    Map.has_key?(tag_meta, :for) or Map.has_key?(tag_meta, :if)
   end
 
   defp validate_unclosed_tags!(%{tags: []} = state, _context) do
@@ -735,23 +762,6 @@ defmodule Phoenix.LiveView.TagEngine do
       " (note <#{tag_name}> is a void tag and cannot have any content)"
     else
       ""
-    end
-  end
-
-  # Root tracking
-  defp set_root_on_not_tag(%{root: root, tags: tags} = state) do
-    if tags == [] and root != false do
-      %{state | root: false}
-    else
-      state
-    end
-  end
-
-  defp set_root_on_tag(state) do
-    case state do
-      %{root: nil, tags: []} -> %{state | root: true}
-      %{root: true, tags: []} -> %{state | root: false}
-      %{root: bool} when is_boolean(bool) -> state
     end
   end
 
@@ -1080,7 +1090,7 @@ defmodule Phoenix.LiveView.TagEngine do
         for {slot_name, slot_values} <- slot_info, into: %{} do
           values =
             for {tag_meta, {root?, attrs, locs}} <- slot_values do
-              %{line: tag_meta.line, root: root?, attrs: attrs_for_call(attrs, locs)}
+              %{line: tag_meta.line, attrs: attrs_for_call(attrs, locs)}
             end
 
           {slot_name, values}
