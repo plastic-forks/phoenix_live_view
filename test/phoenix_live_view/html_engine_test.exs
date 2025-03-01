@@ -1710,7 +1710,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
 
     test "raise on invalid :for expr" do
       message = """
-      test/phoenix_live_view/html_engine_test.exs:1:6: :for must be a generator expression (pattern <- enumerable) between {...}
+      test/phoenix_live_view/html_engine_test.exs:1:6: :for must be a generator expression (pattern <- enumerable) between {...} in tag: div
         |
       1 | <div :for={@user}>Content</div>
         |      ^\
@@ -1723,7 +1723,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
       end)
 
       message = """
-      test/phoenix_live_view/html_engine_test.exs:1:6: :for must be an expression between {...}
+      test/phoenix_live_view/html_engine_test.exs:1:6: :for must be an expression between {...} in tag: div
         |
       1 | <div :for=\"1\">Content</div>
         |      ^\
@@ -1736,7 +1736,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
       end)
 
       message = """
-      test/phoenix_live_view/html_engine_test.exs:1:7: :for must be an expression between {...}
+      test/phoenix_live_view/html_engine_test.exs:1:7: :for must be an expression between {...} in local component: div
         |
       1 | <.div :for=\"1\">Content</.div>
         |       ^\
@@ -1879,7 +1879,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
 
     test "raise on invalid :if expr" do
       message = """
-      test/phoenix_live_view/html_engine_test.exs:1:6: :if must be an expression between {...}
+      test/phoenix_live_view/html_engine_test.exs:1:6: :if must be an expression between {...} in tag: div
         |
       1 | <div :if=\"1\">test</div>
         |      ^\

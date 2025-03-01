@@ -187,6 +187,7 @@ defmodule Phoenix.LiveView.TagEngine do
     }
 
     tokens
+    # |> IO.inspect()
     |> Stream.map(&preprocess_token(&1, token_state))
     |> Enum.map(& &1)
     # |> IO.inspect()
@@ -202,6 +203,7 @@ defmodule Phoenix.LiveView.TagEngine do
       {&remove_phx_no_attr/3, [:tag, :remote_component, :local_component, :slot]},
       {&validate_tag_attr!/3, [:tag]},
       {&validate_component_attr!/3, [:remote_component, :local_component]},
+      {&normalize_attr/3, [:tag, :remote_component, :local_component, :slot]},
       {&pop_special_attr!/3, [:tag, :remote_component, :local_component]}
     ]
 
@@ -260,7 +262,9 @@ defmodule Phoenix.LiveView.TagEngine do
         :ok
 
       _ ->
-        message = "#{a_name} must be an expression between {...}"
+        message =
+          "#{a_name} must be an expression between {...} in #{humanize_t_type(t_type)}: #{t_name}"
+
         raise_syntax_error!(message, a_meta, state)
     end
 
@@ -303,7 +307,9 @@ defmodule Phoenix.LiveView.TagEngine do
           :ok
 
         _ ->
-          message = "#{a_name} must be an expression between {...}"
+          message =
+            "#{a_name} must be an expression between {...} in #{humanize_t_type(t_type)}: #{t_name}"
+
           raise_syntax_error!(message, a_meta, state)
       end
     end
@@ -342,14 +348,60 @@ defmodule Phoenix.LiveView.TagEngine do
     {t_type, t_name, [attr | t_attrs], t_meta}
   end
 
+  defp normalize_attr(
+         {:root = a_name, {:expr, source, v_meta}, a_meta} = attr,
+         {t_type, t_name, t_attrs, t_meta},
+         state
+       ) do
+    quoted = to_quoted!(source, v_meta, state)
+    attr = {a_name, {:quoted, quoted, v_meta}, a_meta}
+    {t_type, t_name, [attr | t_attrs], t_meta}
+  end
+
+  defp normalize_attr(
+         {a_name, {:expr, source, v_meta}, a_meta} = attr,
+         {t_type, t_name, t_attrs, t_meta},
+         state
+       ) do
+    quoted = to_quoted!(source, v_meta, state)
+    attr = {a_name, {:quoted, quoted, v_meta}, a_meta}
+    {t_type, t_name, [attr | t_attrs], t_meta}
+  end
+
+  defp normalize_attr(
+         {a_name, {:string, string, v_meta}, a_meta} = attr,
+         {t_type, t_name, t_attrs, t_meta},
+         _state
+       ) do
+    {t_type, t_name, [attr | t_attrs], t_meta}
+  end
+
+  defp normalize_attr(
+         {a_name, nil, a_meta} = attr,
+         {t_type, t_name, t_attrs, t_meta},
+         _state
+       ) do
+    {t_type, t_name, [attr | t_attrs], t_meta}
+  end
+
   defp pop_special_attr!(
-         {":" <> _ = a_name, a_value, a_meta} = attr,
+         {":" <> _ = a_name, {:quoted, quoted, v_meta}, a_meta} = attr,
          {t_type, t_name, t_attrs, t_meta},
          state
        )
        when a_name in [":if", ":for"] do
-    expr = parse_expr!(a_value, state)
-    validate_quoted_special_attr!(a_name, expr, a_meta, state)
+    if a_name == ":for" do
+      case quoted do
+        {:<-, _, [_, _]} ->
+          :ok
+
+        _ ->
+          message =
+            "#{a_name} must be a generator expression (pattern <- enumerable) between {...} in #{humanize_t_type(t_type)}: #{t_name}"
+
+          raise_syntax_error!(message, a_meta, state)
+      end
+    end
 
     key =
       case a_name do
@@ -357,7 +409,7 @@ defmodule Phoenix.LiveView.TagEngine do
         ":for" -> :for
       end
 
-    t_meta = Map.put(t_meta, key, expr)
+    t_meta = Map.put(t_meta, key, quoted)
     {t_type, t_name, t_attrs, t_meta}
   end
 
@@ -382,16 +434,16 @@ defmodule Phoenix.LiveView.TagEngine do
 
   # Expr
 
-  defp handle_token({:expr, marker, expr}, state) do
+  defp handle_token({:expr, marker, quoted}, state) do
     state
-    |> update_subengine(:acc_expr, [marker, expr])
+    |> update_subengine(:acc_expr, [marker, quoted])
   end
 
-  defp handle_token({:body_expr, value, %{line: line, column: column}}, state) do
-    expr = Code.string_to_quoted!(value, line: line, column: column, file: state.file)
+  defp handle_token({:body_expr, source, t_meta}, state) do
+    quoted = to_quoted!(source, t_meta, state)
 
     state
-    |> update_subengine(:acc_expr, ["=", expr])
+    |> update_subengine(:acc_expr, ["=", quoted])
   end
 
   # HTML element (self close)
@@ -528,9 +580,9 @@ defmodule Phoenix.LiveView.TagEngine do
 
   # Local function component (self close)
 
-  defp handle_token({:local_component, name, attrs, %{closing: :self} = tag_meta}, state) do
-    fun = String.to_atom(name)
-    %{line: line, column: column} = tag_meta
+  defp handle_token({:local_component, t_name, attrs, %{closing: :self} = t_meta}, state) do
+    fun = String.to_atom(t_name)
+    %{line: line, column: column} = t_meta
 
     {assigns, attr_info} =
       build_self_close_component_assigns({"local component", fun}, attrs, line, state)
@@ -548,13 +600,13 @@ defmodule Phoenix.LiveView.TagEngine do
         )
       end
 
-    if has_special_expr?(tag_meta) do
+    if has_special_expr?(t_meta) do
       state
       |> push_substate_to_stack()
       |> update_subengine(:reset, [])
       |> maybe_anno_caller(meta, state.file, line)
       |> update_subengine(:acc_expr, ["=", ast])
-      |> handle_special_expr(tag_meta)
+      |> handle_special_expr(t_meta)
     else
       state
       |> maybe_anno_caller(meta, state.file, line)
@@ -622,7 +674,7 @@ defmodule Phoenix.LiveView.TagEngine do
     validate_slot!(state, slot_name, tag_meta)
 
     %{line: line} = tag_meta
-    {special, roots, attrs, attr_info} = split_component_attrs({"slot", slot_name}, attrs, state)
+    {special, roots, attrs, attr_info} = split_component_attrs(attrs, state)
     let = special[":let"]
 
     with {_, let_meta} <- let do
@@ -650,7 +702,7 @@ defmodule Phoenix.LiveView.TagEngine do
     slot_name = String.to_atom(slot_name)
     {{:slot, _name, attrs, %{line: line} = tag_meta}, state} = pop_tag!(state, token)
 
-    {special, roots, attrs, attr_info} = split_component_attrs({"slot", slot_name}, attrs, state)
+    {special, roots, attrs, attr_info} = split_component_attrs(attrs, state)
     clauses = build_component_clauses(special[":let"], state)
 
     ast =
@@ -812,32 +864,31 @@ defmodule Phoenix.LiveView.TagEngine do
 
   defp handle_tag_attrs(state, meta, attrs) do
     Enum.reduce(attrs, state, fn
-      {:root, {:expr, _, _} = expr, _attr_meta}, state ->
-        ast = parse_expr!(expr, state)
-
+      {:root, {:quoted, quoted, _}, _a_meta}, state ->
         # If we have a map of literal keys, we unpack it as a list
         # to simplify the downstream check.
-        ast =
-          with {:%{}, _meta, pairs} <- ast,
+
+        quoted =
+          with {:%{}, _meta, pairs} <- quoted,
                true <- literal_keys?(pairs) do
             pairs
           else
-            _ -> ast
+            _ -> quoted
           end
 
-        handle_tag_expr_attrs(state, meta, ast)
+        handle_tag_expr_attrs(state, meta, quoted)
 
-      {name, {:expr, _, _} = expr, _attr_meta}, state ->
-        handle_tag_expr_attrs(state, meta, [{name, parse_expr!(expr, state)}])
+      {a_name, {:quoted, quoted, _}, _a_meta}, state ->
+        handle_tag_expr_attrs(state, meta, [{a_name, quoted}])
 
-      {name, {:string, value, %{delimiter: ?"}}, _attr_meta}, state ->
-        update_subengine(state, :acc_text, [~s( #{name}="#{value}")])
+      {a_name, {:string, value, %{delimiter: ?"}}, _a_meta}, state ->
+        update_subengine(state, :acc_text, [~s( #{a_name}="#{value}")])
 
-      {name, {:string, value, %{delimiter: ?'}}, _attr_meta}, state ->
-        update_subengine(state, :acc_text, [~s( #{name}='#{value}')])
+      {a_name, {:string, value, %{delimiter: ?'}}, _a_meta}, state ->
+        update_subengine(state, :acc_text, [~s( #{a_name}='#{value}')])
 
-      {name, nil, _attr_meta}, state ->
-        update_subengine(state, :acc_text, [" #{name}"])
+      {a_name, nil, _a_meta}, state ->
+        update_subengine(state, :acc_text, [" #{a_name}"])
     end)
   end
 
@@ -871,10 +922,6 @@ defmodule Phoenix.LiveView.TagEngine do
       {:quoted, quoted} ->
         update_subengine(state, :acc_expr, ["=", quoted])
     end
-  end
-
-  defp parse_expr!({:expr, value, %{line: line, column: column}}, state) do
-    Code.string_to_quoted!(value, line: line, column: column, file: state.file)
   end
 
   defp literal_keys?([{key, _value} | rest]) when is_atom(key) or is_binary(key),
@@ -918,17 +965,14 @@ defmodule Phoenix.LiveView.TagEngine do
   ## build_self_close_component_assigns/build_component_assigns
 
   defp build_self_close_component_assigns(type_component, attrs, line, state) do
-    IO.inspect({type_component, attrs, line})
-
-    {special, roots, attrs, attr_info} =
-      split_component_attrs(type_component, attrs, state) |> IO.inspect()
+    {special, roots, attrs, attr_info} = split_component_attrs(attrs, state)
 
     # {assigns, attr_info}
     {merge_component_attrs(roots, attrs, line), attr_info}
   end
 
   defp build_component_assigns(type_component, attrs, line, tag_meta, state) do
-    {special, roots, attrs, attr_info} = split_component_attrs(type_component, attrs, state)
+    {special, roots, attrs, attr_info} = split_component_attrs(attrs, state)
     clauses = build_component_clauses(special[":let"], state)
 
     inner_block =
@@ -955,14 +999,14 @@ defmodule Phoenix.LiveView.TagEngine do
     {merge_component_attrs(roots, attrs, line), attr_info, slot_info, state}
   end
 
-  defp split_component_attrs(type_component, attrs, state) do
+  defp split_component_attrs(attrs, state) do
     {special, roots, attrs, locs} =
       attrs
       |> Enum.reverse()
       |> Enum.reduce(
         {%{}, [], [], []},
         fn attr, acc ->
-          split_component_attr(attr, acc, state, type_component)
+          split_component_attr(attr, acc, state)
         end
       )
 
@@ -976,44 +1020,36 @@ defmodule Phoenix.LiveView.TagEngine do
   end
 
   defp split_component_attr(
-         {:root, {:expr, value, %{line: line, column: col}}, _attr_meta},
+         {:root, {:quoted, quoted, v_meta}, _a_meta},
          {special, r, a, locs},
-         state,
-         _type_component
+         state
        ) do
-    quoted_value = Code.string_to_quoted!(value, line: line, column: col, file: state.file)
-    quoted_value = quote line: line, do: Map.new(unquote(quoted_value))
-    {special, [quoted_value | r], a, locs}
+    quoted = quote line: v_meta.line, do: Map.new(unquote(quoted))
+    {special, [quoted | r], a, locs}
   end
 
   @special_attrs ~w(:let :if :for)
   defp split_component_attr(
-         {attr, {:expr, value, %{line: line, column: col} = meta}, attr_meta},
+         {a_name, {:quoted, quoted, v_meta}, a_meta},
          {special, r, a, locs},
-         state,
-         _type_component
+         state
        )
-       when attr in @special_attrs do
-    quoted_value = Code.string_to_quoted!(value, line: line, column: col, file: state.file)
-    validate_quoted_special_attr!(attr, quoted_value, attr_meta, state)
-    {Map.put(special, attr, {quoted_value, attr_meta}), r, a, locs}
+       when a_name in @special_attrs do
+    {Map.put(special, a_name, {quoted, a_meta}), r, a, locs}
   end
 
   defp split_component_attr(
-         {name, {:expr, value, %{line: line, column: col}}, attr_meta},
+         {a_name, {:quoted, quoted, v_meta}, a_meta},
          {special, r, a, locs},
-         state,
-         _type_component
+         state
        ) do
-    quoted_value = Code.string_to_quoted!(value, line: line, column: col, file: state.file)
-    {special, r, [{String.to_atom(name), quoted_value} | a], [line_column(attr_meta) | locs]}
+    {special, r, [{String.to_atom(a_name), quoted} | a], [line_column(a_meta) | locs]}
   end
 
   defp split_component_attr(
          {name, {:string, value, _meta}, attr_meta},
          {special, r, a, locs},
-         _state,
-         _type_component
+         _state
        ) do
     {special, r, [{String.to_atom(name), value} | a], [line_column(attr_meta) | locs]}
   end
@@ -1021,8 +1057,7 @@ defmodule Phoenix.LiveView.TagEngine do
   defp split_component_attr(
          {name, nil, attr_meta},
          {special, r, a, locs},
-         _state,
-         _type_component
+         _state
        ) do
     {special, r, [{String.to_atom(name), true} | a], [line_column(attr_meta) | locs]}
   end
@@ -1181,19 +1216,6 @@ defmodule Phoenix.LiveView.TagEngine do
     end
   end
 
-  defp validate_quoted_special_attr!(":for", {:<-, _, [_, _]}, _attr_meta, _state) do
-    :ok
-  end
-
-  defp validate_quoted_special_attr!(":for", quoted_value, attr_meta, state) do
-    message = ":for must be a generator expression (pattern <- enumerable) between {...}"
-    raise_syntax_error!(message, attr_meta, state)
-  end
-
-  defp validate_quoted_special_attr!(_attr, _quoted_value, _attr_meta, _state) do
-    :ok
-  end
-
   defp tag_slots({call, meta, args}, slot_info) do
     {call, [slots: Keyword.keys(slot_info)] ++ meta, args}
   end
@@ -1323,6 +1345,11 @@ defmodule Phoenix.LiveView.TagEngine do
       {:body_expr, _, _} -> false
       _ -> true
     end)
+  end
+
+  defp to_quoted!(source, %{line: line, column: column} = _meta, %{file: file} = _state)
+       when is_binary(source) do
+    Code.string_to_quoted!(source, line: line, column: column, file: file)
   end
 
   defp humanize_t_type(:tag), do: "tag"
