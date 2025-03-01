@@ -499,9 +499,15 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
     end
 
     test "raise on remote call passing args to self close components" do
-      message = ~r".exs:2: cannot use :let on a component without inner content"
+      message = """
+      test/phoenix_live_view/html_engine_test.exs:2:70: cannot use ":let" on a component without inner content
+        |
+      1 | <br>
+      2 | <Phoenix.LiveView.HTMLEngineTest.remote_function_component value='1' :let={var}/>
+        |                                                                      ^\
+      """
 
-      assert_raise(CompileError, message, fn ->
+      assert_raise(ParseError, message, fn ->
         eval("""
         <br>
         <Phoenix.LiveView.HTMLEngineTest.remote_function_component value='1' :let={var}/>
@@ -577,9 +583,15 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
     end
 
     test "raise on local call passing args to self close components" do
-      message = ~r".exs:2: cannot use :let on a component without inner content"
+      message = """
+      test/phoenix_live_view/html_engine_test.exs:2:38: cannot use ":let" on a component without inner content
+        |
+      1 | <br>
+      2 | <.local_function_component value='1' :let={var}/>
+        |                                      ^\
+      """
 
-      assert_raise(CompileError, message, fn ->
+      assert_raise(ParseError, message, fn ->
         eval("""
         <br>
         <.local_function_component value='1' :let={var}/>
@@ -604,7 +616,9 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
         <Phoenix.LiveView.HTMLEngineTest.remote_function_component value='1'
           :let={var1}
           :let={var2}
-        />
+        >
+          Content
+        </Phoenix.LiveView.HTMLEngineTest.remote_function_component>
         """)
       end)
 
@@ -624,7 +638,9 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
         <.local_function_component value='1'
           :let={var1}
           :let={var2}
-        />
+        >
+          Content
+        <.local_function_component>
         """)
       end)
     end
@@ -1600,7 +1616,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
   describe "validate tag's special attributes" do
     test "raise on unsupported special attributes" do
       message = """
-      test/phoenix_live_view/html_engine_test.exs:1:6: unsupported attribute :let in tags
+      test/phoenix_live_view/html_engine_test.exs:1:6: unsupported attribute \":let\" in tag: div
         |
       1 | <div :let={@user}>Content</div>
         |      ^\
@@ -1613,7 +1629,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
       end)
 
       message = """
-      test/phoenix_live_view/html_engine_test.exs:1:6: unsupported attribute :foo in tags
+      test/phoenix_live_view/html_engine_test.exs:1:6: unsupported attribute \":foo\" in tag: div
         |
       1 | <div :foo=\"something\" />
         |      ^\
@@ -1770,6 +1786,26 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
         <div :for={item <- [1, 2]} :for={item <- [1, 2]}>Content</div>
         """)
       end)
+
+      message = """
+      test/phoenix_live_view/html_engine_test.exs:3:3: cannot define multiple :for attributes. Another :for has already been defined at line 2
+        |
+      1 | <div
+      2 |   :for={item <- [1, 2]}
+      3 |   :for={item <- [1, 2]}
+        |   ^\
+      """
+
+      assert_raise(ParseError, message, fn ->
+        eval("""
+        <div
+          :for={item <- [1, 2]}
+          :for={item <- [1, 2]}
+        >
+          Content
+        </div>
+        """)
+      end)
     end
 
     test ":for in slots" do
@@ -1887,6 +1923,26 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
       assert_raise(ParseError, message, fn ->
         eval("""
         <div :if={true} :if={false}>test</div>
+        """)
+      end)
+
+      message = """
+      test/phoenix_live_view/html_engine_test.exs:3:3: cannot define multiple :if attributes. Another :if has already been defined at line 2
+        |
+      1 | <div
+      2 |   :if={true}
+      3 |   :if={false}
+        |   ^\
+      """
+
+      assert_raise(ParseError, message, fn ->
+        eval("""
+        <div
+          :if={true}
+          :if={false}
+        >
+          test
+        </div>
         """)
       end)
     end

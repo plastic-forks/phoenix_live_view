@@ -23,6 +23,15 @@ defmodule Phoenix.LiveView.TagEngine do
   Where module specified by `:tag_handler`, implements the behaviour
   defined by `Phoenix.LiveView.TagHandler`.
 
+  ## Features
+
+  ### Root attributes
+
+      attrs = %{name: "Zeke", gender: "male"}
+      ~H\"\"\"
+      <div {attrs}>
+      \"\"\"
+
   ## Steps
 
   ### Step 1 - EEx's compiler
@@ -205,124 +214,155 @@ defmodule Phoenix.LiveView.TagEngine do
 
   defp preprocess_token(token, _state), do: token
 
-  defp apply_rule({type, name, attrs, meta}, fun, state) do
-    {new_attrs, new_meta} =
-      Enum.reduce(attrs, {[], meta}, fn attr, acc ->
+  defp apply_rule({t_type, t_name, t_attrs, t_meta}, fun, state) do
+    {t_type, t_name, new_t_attrs, new_t_meta} =
+      Enum.reduce(t_attrs, {t_type, t_name, [], t_meta}, fn attr, acc ->
         fun.(attr, acc, state)
       end)
 
-    new_attrs = Enum.reverse(new_attrs)
+    new_t_attrs = Enum.reverse(new_t_attrs)
 
-    {type, name, new_attrs, new_meta}
+    {t_type, t_name, new_t_attrs, new_t_meta}
   end
 
-  defp remove_phx_no_attr({"phx-no-format", _, _}, {attrs, meta}, _state),
-    do: {attrs, meta}
+  defp remove_phx_no_attr({"phx-no-format", _, _}, token, _state),
+    do: token
 
-  defp remove_phx_no_attr({"phx-no-curly-interpolation", _, _}, {attrs, meta}, _state),
-    do: {attrs, meta}
+  defp remove_phx_no_attr({"phx-no-curly-interpolation", _, _}, token, _state),
+    do: token
 
-  defp remove_phx_no_attr(attr, {attrs, meta}, _state),
-    do: {[attr | attrs], meta}
+  defp remove_phx_no_attr(attr, {t_type, t_name, t_attrs, t_meta}, _state),
+    do: {t_type, t_name, [attr | t_attrs], t_meta}
 
-  defp validate_tag_attr!({":" <> _ = name, value, meta} = attr, {attrs, token_meta}, state)
-       when name in [":if", ":for"] do
+  defp validate_tag_attr!(
+         {":" <> _ = a_name, a_value, a_meta} = attr,
+         {t_type, t_name, t_attrs, t_meta},
+         state
+       )
+       when a_name in [":if", ":for"] do
     # validate duplicated attr
-    case List.keyfind(attrs, name, 0) do
+    case List.keyfind(t_attrs, a_name, 0) do
       nil ->
         :ok
 
-      {_, _, _} ->
+      {_, _, dup_a_meta} ->
         message = """
-        cannot define multiple #{name} attributes. \
-        Another #{name} has already been defined at line #{meta.line}\
+        cannot define multiple #{a_name} attributes. \
+        Another #{a_name} has already been defined at line #{dup_a_meta.line}\
         """
 
-        raise_syntax_error!(message, meta, state)
+        raise_syntax_error!(message, a_meta, state)
     end
 
     # validate value of attr
-    case value do
+    case a_value do
       {:expr, _, _} ->
         :ok
 
       _ ->
-        message = "#{name} must be an expression between {...}"
-        raise_syntax_error!(message, meta, state)
+        message = "#{a_name} must be an expression between {...}"
+        raise_syntax_error!(message, a_meta, state)
     end
 
-    {[attr | attrs], token_meta}
+    {t_type, t_name, [attr | t_attrs], t_meta}
   end
 
-  defp validate_tag_attr!({":" <> _ = name, _, meta}, {_attrs, _token_meta}, state) do
-    message = "unsupported attribute #{name} in tags"
-    raise_syntax_error!(message, meta, state)
+  defp validate_tag_attr!({":" <> _ = a_name, _, a_meta}, {t_type, t_name, _, _}, state) do
+    message = "unsupported attribute #{inspect(a_name)} in #{humanize_t_type(t_type)}: #{t_name}"
+    raise_syntax_error!(message, a_meta, state)
   end
 
-  defp validate_tag_attr!(attr, {attrs, token_meta}, _state) do
-    {[attr | attrs], token_meta}
+  defp validate_tag_attr!(attr, {t_type, t_name, t_attrs, t_meta}, _state) do
+    {t_type, t_name, [attr | t_attrs], t_meta}
   end
 
-  defp validate_component_attr!({":" <> _ = name, value, meta} = attr, {attrs, token_meta}, state)
-       when name in [":if", ":for"] do
+  defp validate_component_attr!(
+         {":" <> _ = a_name, a_value, a_meta} = attr,
+         {t_type, t_name, t_attrs, t_meta},
+         state
+       )
+       when a_name in [":if", ":for", ":let"] do
     # validate duplicated attr
-    case List.keyfind(attrs, name, 0) do
+    case List.keyfind(t_attrs, a_name, 0) do
       nil ->
         :ok
 
-      {_, _, _} ->
+      {_, _, dup_a_meta} ->
         message = """
-        cannot define multiple #{name} attributes. \
-        Another #{name} has already been defined at line #{meta.line}\
+        cannot define multiple #{a_name} attributes. \
+        Another #{a_name} has already been defined at line #{dup_a_meta.line}\
         """
 
-        raise_syntax_error!(message, meta, state)
+        raise_syntax_error!(message, a_meta, state)
     end
 
     # validate value of attr
-    case value do
-      {:expr, _, _} ->
-        :ok
+    if a_name in [":if", ":for"] do
+      case a_value do
+        {:expr, _, _} ->
+          :ok
 
-      _ ->
-        message = "#{name} must be an expression between {...}"
-        raise_syntax_error!(message, meta, state)
+        _ ->
+          message = "#{a_name} must be an expression between {...}"
+          raise_syntax_error!(message, a_meta, state)
+      end
     end
 
-    {[attr | attrs], token_meta}
+    if a_name in [":let"] do
+      case a_value do
+        {:expr, _, _} ->
+          :ok
+
+        _ ->
+          message =
+            "#{a_name} must be a pattern between {...} in #{humanize_t_type(t_type)}: #{t_name}"
+
+          raise_syntax_error!(message, a_meta, state)
+      end
+
+      case t_meta do
+        %{closing: :self} ->
+          message = "cannot use #{inspect(a_name)} on a component without inner content"
+          raise_syntax_error!(message, a_meta, state)
+
+        %{} ->
+          :ok
+      end
+    end
+
+    {t_type, t_name, [attr | t_attrs], t_meta}
   end
 
-  defp validate_component_attr!({":let", _, _} = attr, {attrs, token_meta}, _state) do
-    {[attr | attrs], token_meta}
+  defp validate_component_attr!({":" <> _ = a_name, _, a_meta}, {t_type, t_name, _, _}, state) do
+    message = "unsupported attribute #{inspect(a_name)} in #{humanize_t_type(t_type)}: #{t_name}"
+    raise_syntax_error!(message, a_meta, state)
   end
 
-  # TODO
-  # defp validate_component_attr!({":" <> _ = name, _, meta}, {_attrs, _token_meta}, state) do
-  #   message = "unsupported attribute #{name} in tags"
-  #   raise_syntax_error!(message, meta, state)
-  # end
-
-  defp validate_component_attr!(attr, {attrs, token_meta}, _state) do
-    {[attr | attrs], token_meta}
+  defp validate_component_attr!(attr, {t_type, t_name, t_attrs, t_meta}, _state) do
+    {t_type, t_name, [attr | t_attrs], t_meta}
   end
 
-  defp pop_special_attr!({":" <> _ = name, value, meta} = attr, {attrs, token_meta}, state)
-       when name in [":if", ":for"] do
-    expr = parse_expr!(value, state)
-    validate_quoted_special_attr!(name, expr, meta, state)
+  defp pop_special_attr!(
+         {":" <> _ = a_name, a_value, a_meta} = attr,
+         {t_type, t_name, t_attrs, t_meta},
+         state
+       )
+       when a_name in [":if", ":for"] do
+    expr = parse_expr!(a_value, state)
+    validate_quoted_special_attr!(a_name, expr, a_meta, state)
 
     key =
-      case name do
+      case a_name do
         ":if" -> :if
         ":for" -> :for
       end
 
-    token_meta = Map.put(token_meta, key, expr)
-    {attrs, token_meta}
+    t_meta = Map.put(t_meta, key, expr)
+    {t_type, t_name, t_attrs, t_meta}
   end
 
-  defp pop_special_attr!(attr, {attrs, token_meta}, _state) do
-    {[attr | attrs], token_meta}
+  defp pop_special_attr!(attr, {t_type, t_name, t_attrs, t_meta}, _state) do
+    {t_type, t_name, [attr | t_attrs], t_meta}
   end
 
   ## handle tokens
@@ -416,8 +456,7 @@ defmodule Phoenix.LiveView.TagEngine do
       quote line: tag_meta.line do
         unquote(__MODULE__).component(
           &(unquote(call) / 1),
-          unquote(assigns),
-          {__MODULE__, __ENV__.function, __ENV__.file, unquote(tag_meta.line)}
+          unquote(assigns)
         )
       end
 
@@ -475,8 +514,93 @@ defmodule Phoenix.LiveView.TagEngine do
       quote line: line do
         unquote(__MODULE__).component(
           &(unquote(call) / 1),
-          unquote(assigns),
-          {__MODULE__, __ENV__.function, __ENV__.file, unquote(line)}
+          unquote(assigns)
+        )
+      end
+      |> tag_slots(slot_info)
+
+    state
+    |> pop_substate_from_stack()
+    |> maybe_anno_caller(meta, state.file, line)
+    |> update_subengine(:acc_expr, ["=", ast])
+    |> handle_special_expr(tag_meta)
+  end
+
+  # Local function component (self close)
+
+  defp handle_token({:local_component, name, attrs, %{closing: :self} = tag_meta}, state) do
+    fun = String.to_atom(name)
+    %{line: line, column: column} = tag_meta
+
+    {assigns, attr_info} =
+      build_self_close_component_assigns({"local component", fun}, attrs, line, state)
+
+    mod = actual_component_module(state.caller, fun)
+    store_component_call({mod, fun}, attr_info, [], line, state)
+    meta = [line: line, column: column]
+    call = {fun, meta, __MODULE__}
+
+    ast =
+      quote line: line do
+        unquote(__MODULE__).component(
+          &(unquote(call) / 1),
+          unquote(assigns)
+        )
+      end
+
+    if has_special_expr?(tag_meta) do
+      state
+      |> push_substate_to_stack()
+      |> update_subengine(:reset, [])
+      |> maybe_anno_caller(meta, state.file, line)
+      |> update_subengine(:acc_expr, ["=", ast])
+      |> handle_special_expr(tag_meta)
+    else
+      state
+      |> maybe_anno_caller(meta, state.file, line)
+      |> update_subengine(:acc_expr, ["=", ast])
+    end
+  end
+
+  # Local function component (with inner content)
+
+  defp handle_token({:local_component, name, attrs, tag_meta} = token, state) do
+    if has_special_expr?(tag_meta) do
+      state
+      |> push_tag({:local_component, name, attrs, tag_meta})
+      |> init_slots()
+      |> push_substate_to_stack()
+      |> update_subengine(:reset, [])
+      |> push_substate_to_stack()
+      |> update_subengine(:reset, [])
+    else
+      state
+      |> push_tag(token)
+      |> init_slots()
+      |> push_substate_to_stack()
+      |> update_subengine(:reset, [])
+    end
+  end
+
+  defp handle_token({:close, :local_component, _name, _tag_close_meta} = token, state) do
+    {{:local_component, name, attrs, tag_meta}, state} = pop_tag!(state, token)
+    fun = String.to_atom(name)
+    %{line: line, column: column} = tag_meta
+
+    mod = actual_component_module(state.caller, fun)
+
+    {assigns, attr_info, slot_info, state} =
+      build_component_assigns({"local component", fun}, attrs, line, tag_meta, state)
+
+    store_component_call({mod, fun}, attr_info, slot_info, line, state)
+    meta = [line: line, column: column]
+    call = {fun, meta, __MODULE__}
+
+    ast =
+      quote line: line do
+        unquote(__MODULE__).component(
+          &(unquote(call) / 1),
+          unquote(assigns)
         )
       end
       |> tag_slots(slot_info)
@@ -541,94 +665,6 @@ defmodule Phoenix.LiveView.TagEngine do
     state
     |> add_slot(slot_name, assigns, inner, tag_meta, special)
     |> pop_substate_from_stack()
-  end
-
-  # Local function component (self close)
-
-  defp handle_token({:local_component, name, attrs, %{closing: :self} = tag_meta}, state) do
-    fun = String.to_atom(name)
-    %{line: line, column: column} = tag_meta
-
-    {assigns, attr_info} =
-      build_self_close_component_assigns({"local component", fun}, attrs, line, state)
-
-    mod = actual_component_module(state.caller, fun)
-    store_component_call({mod, fun}, attr_info, [], line, state)
-    meta = [line: line, column: column]
-    call = {fun, meta, __MODULE__}
-
-    ast =
-      quote line: line do
-        unquote(__MODULE__).component(
-          &(unquote(call) / 1),
-          unquote(assigns),
-          {__MODULE__, __ENV__.function, __ENV__.file, unquote(line)}
-        )
-      end
-
-    if has_special_expr?(tag_meta) do
-      state
-      |> push_substate_to_stack()
-      |> update_subengine(:reset, [])
-      |> maybe_anno_caller(meta, state.file, line)
-      |> update_subengine(:acc_expr, ["=", ast])
-      |> handle_special_expr(tag_meta)
-    else
-      state
-      |> maybe_anno_caller(meta, state.file, line)
-      |> update_subengine(:acc_expr, ["=", ast])
-    end
-  end
-
-  # Local function component (with inner content)
-
-  defp handle_token({:local_component, name, attrs, tag_meta} = token, state) do
-    if has_special_expr?(tag_meta) do
-      state
-      |> push_tag({:local_component, name, attrs, tag_meta})
-      |> init_slots()
-      |> push_substate_to_stack()
-      |> update_subengine(:reset, [])
-      |> push_substate_to_stack()
-      |> update_subengine(:reset, [])
-    else
-      state
-      |> push_tag(token)
-      |> init_slots()
-      |> push_substate_to_stack()
-      |> update_subengine(:reset, [])
-    end
-  end
-
-  defp handle_token({:close, :local_component, _name, _tag_close_meta} = token, state) do
-    {{:local_component, name, attrs, tag_meta}, state} = pop_tag!(state, token)
-    fun = String.to_atom(name)
-    %{line: line, column: column} = tag_meta
-
-    mod = actual_component_module(state.caller, fun)
-
-    {assigns, attr_info, slot_info, state} =
-      build_component_assigns({"local component", fun}, attrs, line, tag_meta, state)
-
-    store_component_call({mod, fun}, attr_info, slot_info, line, state)
-    meta = [line: line, column: column]
-    call = {fun, meta, __MODULE__}
-
-    ast =
-      quote line: line do
-        unquote(__MODULE__).component(
-          &(unquote(call) / 1),
-          unquote(assigns),
-          {__MODULE__, __ENV__.function, __ENV__.file, unquote(line)}
-        )
-      end
-      |> tag_slots(slot_info)
-
-    state
-    |> pop_substate_from_stack()
-    |> maybe_anno_caller(meta, state.file, line)
-    |> update_subengine(:acc_expr, ["=", ast])
-    |> handle_special_expr(tag_meta)
   end
 
   defp has_special_expr?(tag_meta) do
@@ -882,8 +918,12 @@ defmodule Phoenix.LiveView.TagEngine do
   ## build_self_close_component_assigns/build_component_assigns
 
   defp build_self_close_component_assigns(type_component, attrs, line, state) do
-    {special, roots, attrs, attr_info} = split_component_attrs(type_component, attrs, state)
-    raise_if_let!(special[":let"], state.file)
+    IO.inspect({type_component, attrs, line})
+
+    {special, roots, attrs, attr_info} =
+      split_component_attrs(type_component, attrs, state) |> IO.inspect()
+
+    # {assigns, attr_info}
     {merge_component_attrs(roots, attrs, line), attr_info}
   end
 
@@ -921,9 +961,17 @@ defmodule Phoenix.LiveView.TagEngine do
       |> Enum.reverse()
       |> Enum.reduce(
         {%{}, [], [], []},
-        &split_component_attr(&1, &2, state, type_component)
+        fn attr, acc ->
+          split_component_attr(attr, acc, state, type_component)
+        end
       )
 
+    #           root_attributes
+    #            |
+    # {special, roots, attrs, attr_info}
+    #                  |
+    #                  regular attributes
+    #                       has_root?
     {special, roots, attrs, {roots != [], attrs, locs}}
   end
 
@@ -946,31 +994,9 @@ defmodule Phoenix.LiveView.TagEngine do
          _type_component
        )
        when attr in @special_attrs do
-    case special do
-      %{^attr => {_, attr_meta}} ->
-        message = """
-        cannot define multiple #{attr} attributes. \
-        Another #{attr} has already been defined at line #{meta.line}\
-        """
-
-        raise_syntax_error!(message, attr_meta, state)
-
-      %{} ->
-        quoted_value = Code.string_to_quoted!(value, line: line, column: col, file: state.file)
-        validate_quoted_special_attr!(attr, quoted_value, attr_meta, state)
-        {Map.put(special, attr, {quoted_value, attr_meta}), r, a, locs}
-    end
-  end
-
-  defp split_component_attr({attr, _, meta}, _state, state, {type, component_or_slot})
-       when attr in @special_attrs do
-    message = "#{attr} must be a pattern between {...} in #{type}: #{component_or_slot}"
-    raise_syntax_error!(message, meta, state)
-  end
-
-  defp split_component_attr({":" <> _ = name, _, meta}, _state, state, {type, component_or_slot}) do
-    message = "unsupported attribute #{inspect(name)} in #{type}: #{component_or_slot}"
-    raise_syntax_error!(message, meta, state)
+    quoted_value = Code.string_to_quoted!(value, line: line, column: col, file: state.file)
+    validate_quoted_special_attr!(attr, quoted_value, attr_meta, state)
+    {Map.put(special, attr, {quoted_value, attr_meta}), r, a, locs}
   end
 
   defp split_component_attr(
@@ -1046,13 +1072,6 @@ defmodule Phoenix.LiveView.TagEngine do
       |> Enum.drop(2)
 
     reraise(message, stacktrace)
-  end
-
-  defp raise_if_let!(let, file) do
-    with {_pattern, %{line: line}} <- let do
-      message = "cannot use :let on a component without inner content"
-      raise CompileError, line: line, file: file, description: message
-    end
   end
 
   defp build_component_clauses(let, state) do
@@ -1235,15 +1254,11 @@ defmodule Phoenix.LiveView.TagEngine do
   It is the same as:
 
   ```heex
-  <%= component(
-        &MyApp.Weather.city/1,
-        [name: "Kraków"],
-        {__ENV__.module, __ENV__.function, __ENV__.file, __ENV__.line}
-      ) %>
+  <%= component(&MyApp.Weather.city/1, [name: "Kraków"]) %>
   ```
 
   """
-  def component(func, assigns, caller)
+  def component(func, assigns)
       when is_function(func, 1) and (is_map(assigns) or is_list(assigns)) do
     assigns =
       case assigns do
@@ -1309,4 +1324,9 @@ defmodule Phoenix.LiveView.TagEngine do
       _ -> true
     end)
   end
+
+  defp humanize_t_type(:tag), do: "tag"
+  defp humanize_t_type(:remote_component), do: "remote component"
+  defp humanize_t_type(:local_component), do: "local component"
+  defp humanize_t_type(:slot), do: "slot"
 end
