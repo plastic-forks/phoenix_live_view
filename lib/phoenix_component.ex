@@ -1074,42 +1074,41 @@ defmodule Phoenix.Component do
       end
 
   '''
-  defmacro render_slot(slot, argument \\ nil) do
+  defmacro render_slot(slot, arg \\ nil) do
     quote do
       unquote(__MODULE__).__render_slot__(
-        var!(changed, Phoenix.LiveView.Engine),
         unquote(slot),
-        unquote(argument)
+        unquote(arg)
       )
     end
   end
 
   @doc false
-  def __render_slot__(_, [], _), do: nil
+  def __render_slot__([], _), do: nil
 
-  def __render_slot__(changed, [entry], argument) do
-    call_inner_block!(entry, changed, argument)
+  def __render_slot__([entry], arg) do
+    call_inner_block!(entry, arg)
   end
 
-  def __render_slot__(changed, entries, argument) when is_list(entries) do
-    assigns = %{entries: entries, changed: changed, argument: argument}
+  def __render_slot__(entries, arg) when is_list(entries) do
+    assigns = %{entries: entries, arg: arg}
 
     ~H"""
-    <%= for entry <- @entries do %>{call_inner_block!(entry, @changed, @argument)}<% end %>
+    <%= for entry <- @entries do %>{call_inner_block!(entry, @arg)}<% end %>
     """noformat
   end
 
-  def __render_slot__(changed, entry, argument) when is_map(entry) do
-    entry.inner_block.(changed, argument)
+  def __render_slot__(entry, arg) when is_map(entry) do
+    entry.inner_block.(arg)
   end
 
-  defp call_inner_block!(entry, changed, argument) do
+  defp call_inner_block!(entry, arg) do
     if !entry.inner_block do
       message = "attempted to render slot <:#{entry.__slot__}> but the slot has no inner content"
       raise RuntimeError, message
     end
 
-    entry.inner_block.(changed, argument)
+    entry.inner_block.(arg)
   end
 
   @doc """
@@ -1286,22 +1285,8 @@ defmodule Phoenix.Component do
     Phoenix.LiveView.Utils.assign_new(socket, key, fun)
   end
 
-  def assign_new(%{__changed__: changed} = assigns, key, fun) when is_function(fun, 1) do
-    case assigns do
-      %{^key => _} -> assigns
-      %{} -> Phoenix.LiveView.Utils.force_assign(assigns, changed, key, fun.(assigns))
-    end
-  end
-
-  def assign_new(%{__changed__: changed} = assigns, key, fun) when is_function(fun, 0) do
-    case assigns do
-      %{^key => _} -> assigns
-      %{} -> Phoenix.LiveView.Utils.force_assign(assigns, changed, key, fun.())
-    end
-  end
-
-  def assign_new(assigns, _key, fun) when is_function(fun, 0) or is_function(fun, 1) do
-    raise_bad_socket_or_assign!("assign_new/3", assigns)
+  def assign_new(%{} = assigns, key, fun) when is_function(fun, 1) do
+    Map.update(assigns, key, fun)
   end
 
   defp raise_bad_socket_or_assign!(name, assigns) do
@@ -1353,22 +1338,8 @@ defmodule Phoenix.Component do
     Phoenix.LiveView.Utils.assign(socket, key, value)
   end
 
-  def assign(%{__changed__: changed} = assigns, key, value) do
-    case assigns do
-      # force assign the key if the attribute was given with matching value
-      %{^key => ^value, __given__: given} when not is_map_key(given, key) ->
-        Phoenix.LiveView.Utils.force_assign(assigns, changed, key, value)
-
-      %{^key => ^value} ->
-        assigns
-
-      %{} ->
-        Phoenix.LiveView.Utils.force_assign(assigns, changed, key, value)
-    end
-  end
-
-  def assign(assigns, _key, _val) do
-    raise_bad_socket_or_assign!("assign/3", assigns)
+  def assign(%{} = assigns, key, value) do
+    Map.put(assigns, key, value)
   end
 
   @doc """

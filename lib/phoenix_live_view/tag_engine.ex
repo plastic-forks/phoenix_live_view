@@ -180,7 +180,7 @@ defmodule Phoenix.LiveView.TagEngine do
     tokens
     |> Stream.map(&preprocess_token(&1, token_state))
     |> Enum.map(& &1)
-    |> IO.inspect()
+    # |> IO.inspect()
     |> Enum.reduce(token_state, &handle_token/2)
     |> validate_unclosed_tags!(context)
   end
@@ -1244,11 +1244,11 @@ defmodule Phoenix.LiveView.TagEngine do
 
   """
   def component(func, assigns, caller)
-      when (is_function(func, 1) and is_list(assigns)) or is_map(assigns) do
+      when is_function(func, 1) and (is_map(assigns) or is_list(assigns)) do
     assigns =
       case assigns do
-        %{__changed__: _} -> assigns
-        _ -> assigns |> Map.new() |> Map.put_new(:__changed__, nil)
+        %{} -> assigns
+        _ -> Map.new(assigns)
       end
 
     case func.(assigns) do
@@ -1287,43 +1287,17 @@ defmodule Phoenix.LiveView.TagEngine do
         inner_fun = {:fn, meta, do_block}
 
         quote do
-          fn parent_changed, arg ->
-            var!(assigns) =
-              unquote(__MODULE__).__assigns__(var!(assigns), unquote(name), parent_changed)
-
-            _ = var!(assigns)
+          fn arg ->
             unquote(inner_fun).(arg)
           end
         end
 
       _ ->
         quote do
-          fn parent_changed, arg ->
-            var!(assigns) =
-              unquote(__MODULE__).__assigns__(var!(assigns), unquote(name), parent_changed)
-
-            _ = var!(assigns)
+          fn arg ->
             unquote(do_block)
           end
         end
-    end
-  end
-
-  @doc false
-  def __assigns__(assigns, key, parent_changed) do
-    # If the component is in its initial render (parent_changed == nil)
-    # or the slot/block key is in parent_changed, then we render the
-    # function with the assigns as is.
-    #
-    # Otherwise, we will set changed to an empty list, which is the same
-    # as marking everything as not changed. This is correct because
-    # parent_changed will always be marked as changed whenever any of the
-    # assigns it references inside is changed. It will also be marked as
-    # changed if it has any variable (such as the ones coming from let).
-    if is_nil(parent_changed) or Map.has_key?(parent_changed, key) do
-      assigns
-    else
-      Map.put(assigns, :__changed__, %{})
     end
   end
 

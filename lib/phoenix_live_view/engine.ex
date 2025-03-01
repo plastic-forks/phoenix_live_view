@@ -75,9 +75,6 @@ defmodule Phoenix.LiveView.Engine do
       |> maybe_add_body_annotation(opts)
 
     quote do
-      # TODO: remove it
-      changed = %{}
-
       require Phoenix.LiveView.Engine
       unquote(ast)
     end
