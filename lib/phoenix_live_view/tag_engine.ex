@@ -187,10 +187,10 @@ defmodule Phoenix.LiveView.TagEngine do
     }
 
     tokens
-    # |> IO.inspect()
+    |> IO.inspect()
     |> Stream.map(&preprocess_token(&1, token_state))
     |> Enum.map(& &1)
-    # |> IO.inspect()
+    |> IO.inspect()
     |> Enum.reduce(token_state, &handle_token/2)
     |> validate_unclosed_tags!(context)
   end
@@ -202,9 +202,9 @@ defmodule Phoenix.LiveView.TagEngine do
     rules = [
       {&remove_phx_no_attr/3, [:tag, :remote_component, :local_component, :slot]},
       {&validate_tag_attr!/3, [:tag]},
-      {&validate_component_attr!/3, [:remote_component, :local_component]},
+      {&validate_component_attr!/3, [:remote_component, :local_component, :slot]},
       {&normalize_attr/3, [:tag, :remote_component, :local_component, :slot]},
-      {&pop_special_attr!/3, [:tag, :remote_component, :local_component]}
+      {&put_special_attr!/3, [:tag, :remote_component, :local_component]}
     ]
 
     Enum.reduce(rules, token, fn {fun, types}, acc ->
@@ -328,7 +328,9 @@ defmodule Phoenix.LiveView.TagEngine do
 
       case t_meta do
         %{closing: :self} ->
-          message = "cannot use #{inspect(a_name)} on a component without inner content"
+          message =
+            "cannot use #{inspect(a_name)} on a #{humanize_t_type(t_type)} without inner content"
+
           raise_syntax_error!(message, a_meta, state)
 
         %{} ->
@@ -354,6 +356,8 @@ defmodule Phoenix.LiveView.TagEngine do
          state
        ) do
     quoted = to_quoted!(source, v_meta, state)
+    # convert keyword list or map into map
+    quoted = quote line: v_meta.line, do: Map.new(unquote(quoted))
     attr = {a_name, {:quoted, quoted, v_meta}, a_meta}
     {t_type, t_name, [attr | t_attrs], t_meta}
   end
@@ -384,12 +388,12 @@ defmodule Phoenix.LiveView.TagEngine do
     {t_type, t_name, [attr | t_attrs], t_meta}
   end
 
-  defp pop_special_attr!(
-         {":" <> _ = a_name, {:quoted, quoted, v_meta}, a_meta} = attr,
+  defp put_special_attr!(
+         {":" <> _ = a_name, {:quoted, quoted, _v_meta} = a_value, a_meta} = attr,
          {t_type, t_name, t_attrs, t_meta},
          state
        )
-       when a_name in [":if", ":for"] do
+       when a_name in [":if", ":for", ":let"] do
     if a_name == ":for" do
       case quoted do
         {:<-, _, [_, _]} ->
@@ -407,13 +411,14 @@ defmodule Phoenix.LiveView.TagEngine do
       case a_name do
         ":if" -> :if
         ":for" -> :for
+        ":let" -> :let
       end
 
-    t_meta = Map.put(t_meta, key, quoted)
+    t_meta = Map.put(t_meta, key, a_value)
     {t_type, t_name, t_attrs, t_meta}
   end
 
-  defp pop_special_attr!(attr, {t_type, t_name, t_attrs, t_meta}, _state) do
+  defp put_special_attr!(attr, {t_type, t_name, t_attrs, t_meta}, _state) do
     {t_type, t_name, [attr | t_attrs], t_meta}
   end
 
@@ -497,7 +502,7 @@ defmodule Phoenix.LiveView.TagEngine do
     %{line: line, column: column} = tag_meta
 
     {assigns, attr_info} =
-      build_self_close_component_assigns({"remote component", name}, attrs, tag_meta.line, state)
+      build_self_close_component_assigns(attrs, tag_meta.line, state)
 
     mod = expand_with_line(mod_ast, line, state.caller)
     store_component_call({mod, fun}, attr_info, [], line, state)
@@ -556,7 +561,7 @@ defmodule Phoenix.LiveView.TagEngine do
     mod = expand_with_line(mod_ast, line, state.caller)
 
     {assigns, attr_info, slot_info, state} =
-      build_component_assigns({"remote component", name}, attrs, line, tag_meta, state)
+      build_component_assigns(attrs, line, tag_meta, state)
 
     store_component_call({mod, fun}, attr_info, slot_info, line, state)
     meta = [line: line, column: column + mod_size]
@@ -585,7 +590,7 @@ defmodule Phoenix.LiveView.TagEngine do
     %{line: line, column: column} = t_meta
 
     {assigns, attr_info} =
-      build_self_close_component_assigns({"local component", fun}, attrs, line, state)
+      build_self_close_component_assigns(attrs, line, state)
 
     mod = actual_component_module(state.caller, fun)
     store_component_call({mod, fun}, attr_info, [], line, state)
@@ -642,7 +647,7 @@ defmodule Phoenix.LiveView.TagEngine do
     mod = actual_component_module(state.caller, fun)
 
     {assigns, attr_info, slot_info, state} =
-      build_component_assigns({"local component", fun}, attrs, line, tag_meta, state)
+      build_component_assigns(attrs, line, tag_meta, state)
 
     store_component_call({mod, fun}, attr_info, slot_info, line, state)
     meta = [line: line, column: column]
@@ -675,12 +680,6 @@ defmodule Phoenix.LiveView.TagEngine do
 
     %{line: line} = tag_meta
     {special, roots, attrs, attr_info} = split_component_attrs(attrs, state)
-    let = special[":let"]
-
-    with {_, let_meta} <- let do
-      message = "cannot use :let on a slot without inner content"
-      raise_syntax_error!(message, let_meta, state)
-    end
 
     attrs = [__slot__: slot_name, inner_block: nil] ++ attrs
     assigns = wrap_special_slot(special, merge_component_attrs(roots, attrs, line))
@@ -703,7 +702,7 @@ defmodule Phoenix.LiveView.TagEngine do
     {{:slot, _name, attrs, %{line: line} = tag_meta}, state} = pop_tag!(state, token)
 
     {special, roots, attrs, attr_info} = split_component_attrs(attrs, state)
-    clauses = build_component_clauses(special[":let"], state)
+    clauses = build_component_clauses_v1(special[":let"], state)
 
     ast =
       quote line: line do
@@ -933,18 +932,18 @@ defmodule Phoenix.LiveView.TagEngine do
   defp handle_special_expr(state, tag_meta) do
     ast =
       case tag_meta do
-        %{for: for_expr, if: if_expr} ->
+        %{for: {:quoted, for_expr, _}, if: {:quoted, if_expr, _}} ->
           quote do
             for unquote(for_expr), unquote(if_expr),
               do: unquote(invoke_subengine(state, :dump, []))
           end
 
-        %{for: for_expr} ->
+        %{for: {:quoted, for_expr, _}} ->
           quote do
             for unquote(for_expr), do: unquote(invoke_subengine(state, :dump, []))
           end
 
-        %{if: if_expr} ->
+        %{if: {:quoted, if_expr, _}} ->
           quote do
             if unquote(if_expr), do: unquote(invoke_subengine(state, :dump, []))
           end
@@ -964,16 +963,16 @@ defmodule Phoenix.LiveView.TagEngine do
 
   ## build_self_close_component_assigns/build_component_assigns
 
-  defp build_self_close_component_assigns(type_component, attrs, line, state) do
-    {special, roots, attrs, attr_info} = split_component_attrs(attrs, state)
-
-    # {assigns, attr_info}
-    {merge_component_attrs(roots, attrs, line), attr_info}
+  defp build_self_close_component_assigns(attrs, line, state) do
+    {build_assigns(attrs, line), build_attrs_info(attrs)}
   end
 
-  defp build_component_assigns(type_component, attrs, line, tag_meta, state) do
+  defp build_component_assigns(attrs, line, tag_meta, state) do
     {special, roots, attrs, attr_info} = split_component_attrs(attrs, state)
-    clauses = build_component_clauses(special[":let"], state)
+
+    # attr_info = build_attrs_info(attrs)
+
+    clauses = build_component_clauses(tag_meta, state)
 
     inner_block =
       quote line: line do
@@ -1019,12 +1018,12 @@ defmodule Phoenix.LiveView.TagEngine do
     {special, roots, attrs, {roots != [], attrs, locs}}
   end
 
+  # TODO
   defp split_component_attr(
          {:root, {:quoted, quoted, v_meta}, _a_meta},
          {special, r, a, locs},
          state
        ) do
-    quoted = quote line: v_meta.line, do: Map.new(unquote(quoted))
     {special, [quoted | r], a, locs}
   end
 
@@ -1063,6 +1062,68 @@ defmodule Phoenix.LiveView.TagEngine do
   end
 
   defp line_column(%{line: line, column: column}), do: {line, column}
+
+  defp build_attrs_info(attrs) do
+    lc = fn meta -> {meta.line, meta.column} end
+
+    {roots, attrs} =
+      attrs
+      |> Enum.reverse()
+      |> Enum.reduce({[], []}, fn
+        {:root, {:quoted, quoted, v_meta}, _}, {roots, attrs} ->
+          {[quoted | roots], attrs}
+
+        {a_name, {:quoted, quoted, v_meta}, a_meta}, {roots, attrs} ->
+          {roots, [{String.to_atom(a_name), quoted, lc.(a_meta)} | attrs]}
+
+        {a_name, {:string, string, v_meta}, a_meta}, {roots, attrs} ->
+          {roots, [{String.to_atom(a_name), string, lc.(a_meta)} | attrs]}
+
+        {a_name, nil, a_meta}, {roots, attrs} ->
+          {roots, [{String.to_atom(a_name), true, lc.(a_meta)} | attrs]}
+      end)
+
+    # TODO: remove it
+    {attrs, locs} =
+      Enum.reduce(attrs, {[], []}, fn {key, value, loc}, {attrs, locs} ->
+        {[{key, value} | attrs], [loc | locs]}
+      end)
+
+    attrs = Enum.reverse(attrs)
+    locs = Enum.reverse(locs)
+
+    {roots != [], attrs, locs}
+  end
+
+  defp build_assigns(attrs, line) do
+    {roots, attrs} =
+      attrs
+      |> Enum.reverse()
+      |> Enum.reduce({[], []}, fn
+        {:root, {:quoted, quoted, v_meta}, _}, {roots, attrs} ->
+          {[quoted | roots], attrs}
+
+        {a_name, {:quoted, quoted, v_meta}, a_meta}, {roots, attrs} ->
+          {roots, [{String.to_atom(a_name), quoted} | attrs]}
+
+        {a_name, {:string, string, v_meta}, a_meta}, {roots, attrs} ->
+          {roots, [{String.to_atom(a_name), string} | attrs]}
+
+        {a_name, nil, a_meta}, {roots, attrs} ->
+          {roots, [{String.to_atom(a_name), true} | attrs]}
+      end)
+
+    asts =
+      case {roots, attrs} do
+        {[], []} -> [{:%{}, [], []}]
+        {_, []} -> roots
+        {_, _} -> roots ++ [{:%{}, [], attrs}]
+      end
+
+    Enum.reduce(asts, fn ast, acc ->
+      quote line: line, do: Map.merge(unquote(acc), unquote(ast))
+    end)
+  end
 
   defp merge_component_attrs(roots, attrs, line) do
     entries =
@@ -1109,8 +1170,43 @@ defmodule Phoenix.LiveView.TagEngine do
     reraise(message, stacktrace)
   end
 
-  defp build_component_clauses(let, state) do
+  defp build_component_clauses(%{let: {:quoted, quoted, v_meta}} = a_meta, state) do
+    %{line: line} = v_meta
+
+    case quoted do
+      # If a var is given, the catch-all clause can be skipped.
+      {var, _, ctx} when is_atom(var) and is_atom(ctx) ->
+        quote line: line do
+          unquote(quoted) -> unquote(invoke_subengine(state, :dump, []))
+        end
+
+      _ ->
+        quote line: line do
+          unquote(quoted) -> unquote(invoke_subengine(state, :dump, []))
+        end ++
+          quote line: line, generated: true do
+            other ->
+              Phoenix.LiveView.TagEngine.__unmatched_let__!(
+                unquote(Macro.to_string(quoted)),
+                other
+              )
+          end
+    end
+  end
+
+  defp build_component_clauses(_a_meta, state) do
+    quote do
+      _ -> unquote(invoke_subengine(state, :dump, []))
+    end
+  end
+
+  defp build_component_clauses_v1(let, state) do
     case let do
+      nil ->
+        quote do
+          _ -> unquote(invoke_subengine(state, :dump, []))
+        end
+
       # If we have a var, we can skip the catch-all clause
       {{var, _, ctx} = pattern, %{line: line}} when is_atom(var) and is_atom(ctx) ->
         quote line: line do
@@ -1128,11 +1224,6 @@ defmodule Phoenix.LiveView.TagEngine do
                 other
               )
           end
-
-      _ ->
-        quote do
-          _ -> unquote(invoke_subengine(state, :dump, []))
-        end
     end
   end
 

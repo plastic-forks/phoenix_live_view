@@ -53,10 +53,6 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
     end
   end
 
-  def assigns_component(assigns) do
-    ~H"{inspect(Map.delete(assigns, :__changed__))}"
-  end
-
   def textarea(assigns) do
     assigns =
       Phoenix.Component.assign(assigns, :extra_assigns, assigns_to_attributes(assigns, []))
@@ -500,7 +496,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
 
     test "raise on remote call passing args to self close components" do
       message = """
-      test/phoenix_live_view/html_engine_test.exs:2:70: cannot use ":let" on a component without inner content
+      test/phoenix_live_view/html_engine_test.exs:2:70: cannot use ":let" on a remote component without inner content
         |
       1 | <br>
       2 | <Phoenix.LiveView.HTMLEngineTest.remote_function_component value='1' :let={var}/>
@@ -584,7 +580,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
 
     test "raise on local call passing args to self close components" do
       message = """
-      test/phoenix_live_view/html_engine_test.exs:2:38: cannot use ":let" on a component without inner content
+      test/phoenix_live_view/html_engine_test.exs:2:38: cannot use ":let" on a local component without inner content
         |
       1 | <br>
       2 | <.local_function_component value='1' :let={var}/>
@@ -764,22 +760,22 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
     end
 
     test "empty attributes" do
-      assert compile("<.assigns_component />") == "%{}"
+      assert compile("<.assigns_inspector />") == "%{}"
     end
 
     test "dynamic attributes" do
       assigns = %{attrs: [name: "1", phone: true]}
 
-      assert compile("<.assigns_component {@attrs} />") ==
+      assert compile("<.assigns_inspector {@attrs} />") ==
                "%{name: &quot;1&quot;, phone: true}"
     end
 
     test "sorts attributes by group: static + dynamic" do
       assigns = %{attrs1: [d1: "1"], attrs2: [d2: "2", d3: "3"]}
 
-      assert compile(
-               "<.assigns_component d1=\"one\" {@attrs1} d=\"middle\" {@attrs2} d2=\"two\" />"
-             ) ==
+      assert compile("""
+             <.assigns_inspector d1="one" {@attrs1} d="middle" {@attrs2} d2="two" />
+             """) ==
                "%{d: &quot;middle&quot;, d1: &quot;one&quot;, d2: &quot;two&quot;, d3: &quot;3&quot;}"
     end
   end
@@ -1205,7 +1201,7 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
 
     test "raise if self close slot uses :let" do
       message = """
-      test/phoenix_live_view/html_engine_test.exs:2:19: cannot use :let on a slot without inner content
+      test/phoenix_live_view/html_engine_test.exs:2:19: cannot use ":let" on a slot without inner content
         |
       1 | <.function_component_with_self_close_slots>
       2 |   <:sample id="1" :let={var}/>
@@ -2098,5 +2094,9 @@ defmodule Phoenix.LiveView.HTMLEngineTest do
       assert meta[:line] == __ENV__.line - 12
       assert meta[:column] == 10
     end
+  end
+
+  defp assigns_inspector(assigns) do
+    ~H"{inspect(assigns)}"
   end
 end
