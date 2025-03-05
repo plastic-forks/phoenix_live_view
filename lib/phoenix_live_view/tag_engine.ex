@@ -199,8 +199,7 @@ defmodule Phoenix.LiveView.TagEngine do
        when type in [:tag, :remote_component, :local_component, :slot] do
     rules = [
       {&remove_phx_no_attr/3, [:tag, :remote_component, :local_component, :slot]},
-      {&validate_tag_attr!/3, [:tag]},
-      {&validate_component_attr!/3, [:remote_component, :local_component, :slot]},
+      {&validate_attr!/3, [:tag, :remote_component, :local_component, :slot]},
       {&normalize_attr/3, [:tag, :remote_component, :local_component, :slot]},
       {&put_special_attr!/3, [:tag, :remote_component, :local_component]}
     ]
@@ -234,56 +233,13 @@ defmodule Phoenix.LiveView.TagEngine do
   defp remove_phx_no_attr(attr, {t_type, t_name, t_attrs, t_meta}, _state),
     do: {t_type, t_name, [attr | t_attrs], t_meta}
 
-  defp validate_tag_attr!(
+  defp validate_attr!(
          {":" <> _ = a_name, a_value, a_meta} = attr,
-         {t_type, t_name, t_attrs, t_meta},
+         {t_type, t_name, t_attrs, t_meta} = tag,
          state
-       )
-       when a_name in [":if", ":for"] do
-    # validate duplicated attr
-    case List.keyfind(t_attrs, a_name, 0) do
-      nil ->
-        :ok
+       ) do
+    validate_supported_attr!(tag, attr, state)
 
-      {_, _, dup_a_meta} ->
-        message = """
-        cannot define multiple #{a_name} attributes. \
-        Another #{a_name} has already been defined at line #{dup_a_meta.line}\
-        """
-
-        raise_syntax_error!(message, a_meta, state)
-    end
-
-    # validate value of attr
-    case a_value do
-      {:expr, _, _} ->
-        :ok
-
-      _ ->
-        message =
-          "#{a_name} must be an expression between {...} in #{humanize_t_type(t_type)}: #{t_name}"
-
-        raise_syntax_error!(message, a_meta, state)
-    end
-
-    {t_type, t_name, [attr | t_attrs], t_meta}
-  end
-
-  defp validate_tag_attr!({":" <> _ = a_name, _, a_meta}, {t_type, t_name, _, _}, state) do
-    message = "unsupported attribute #{inspect(a_name)} in #{humanize_t_type(t_type)}: #{t_name}"
-    raise_syntax_error!(message, a_meta, state)
-  end
-
-  defp validate_tag_attr!(attr, {t_type, t_name, t_attrs, t_meta}, _state) do
-    {t_type, t_name, [attr | t_attrs], t_meta}
-  end
-
-  defp validate_component_attr!(
-         {":" <> _ = a_name, a_value, a_meta} = attr,
-         {t_type, t_name, t_attrs, t_meta},
-         state
-       )
-       when a_name in [":if", ":for", ":let"] do
     # validate duplicated attr
     case List.keyfind(t_attrs, a_name, 0) do
       nil ->
@@ -339,13 +295,39 @@ defmodule Phoenix.LiveView.TagEngine do
     {t_type, t_name, [attr | t_attrs], t_meta}
   end
 
-  defp validate_component_attr!({":" <> _ = a_name, _, a_meta}, {t_type, t_name, _, _}, state) do
-    message = "unsupported attribute #{inspect(a_name)} in #{humanize_t_type(t_type)}: #{t_name}"
-    raise_syntax_error!(message, a_meta, state)
+  defp validate_attr!(attr, {t_type, t_name, t_attrs, t_meta}, _state) do
+    {t_type, t_name, [attr | t_attrs], t_meta}
   end
 
-  defp validate_component_attr!(attr, {t_type, t_name, t_attrs, t_meta}, _state) do
-    {t_type, t_name, [attr | t_attrs], t_meta}
+  defp validate_supported_attr!(
+         {:tag = t_type, t_name, _, _},
+         {":" <> _ = a_name, _, a_meta},
+         state
+       ) do
+    if a_name in [":if", ":for"] do
+      :ok
+    else
+      message =
+        "unsupported attribute #{inspect(a_name)} in #{humanize_t_type(t_type)}: #{t_name}"
+
+      raise_syntax_error!(message, a_meta, state)
+    end
+  end
+
+  defp validate_supported_attr!({t_type, t_name, _, _}, {":" <> _ = a_name, _, a_meta}, state)
+       when t_type in [:remote_component, :local_component, :slot] do
+    if a_name in [":if", ":for", ":let"] do
+      :ok
+    else
+      message =
+        "unsupported attribute #{inspect(a_name)} in #{humanize_t_type(t_type)}: #{t_name}"
+
+      raise_syntax_error!(message, a_meta, state)
+    end
+  end
+
+  defp validate_supported_attr!(tag, attr, state) do
+    :ok
   end
 
   defp normalize_attr(
